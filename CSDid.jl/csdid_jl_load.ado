@@ -19,7 +19,7 @@ program define csdid_jl_load
   * Colleagues can override in profile.do:
   *   global csdid_jl_github_url    "https://github.com/YOUR-FORK/csdidjl"
   *   global csdid_jl_github_subdir "CSDid.jl"
-  *   global csdid_jl_github_rev    "path_install"     // branch or tag
+  *   global csdid_jl_github_rev    "some-branch-name" // branch or tag; usually leave unset
   if `"$csdid_jl_github_url"' == "" {
     global csdid_jl_github_url "https://github.com/anzonyquispe/csdidjl"
   }
