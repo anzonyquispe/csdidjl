@@ -1,12 +1,16 @@
-*! csdid_jl_diagnose 0.1.0  06jul2026
+*! csdid_jl_diagnose 0.2.0  06jul2026
 *! Health check for csdid_jl. Runs a series of independent probes and
-*! reports PASS / FAIL for each, so users can see exactly what's broken
-*! without having to interpret cascading Julia stack traces.
+*! reports PASS / FAIL for each so users can see exactly what's broken.
 *!
 *!   . csdid_jl_diagnose
 *!
-*! Every step is captured; a failure in one step does NOT abort the rest.
+*! Each step is captured; a failure in one step does NOT abort the rest.
 *! Users can paste the whole output when asking for help.
+*!
+*! v0.2.0: rewrote [4]/[5] to use simple Julia expressions (multi-statement
+*!         `import` inside parens isn't valid Julia). Removed the network
+*!         probe [7] — it wasn't essential and its command-quoting was
+*!         fighting both Stata and Julia parsers.
 
 cap program drop csdid_jl_diagnose
 program define csdid_jl_diagnose
@@ -66,10 +70,7 @@ program define csdid_jl_diagnose
   cap noi qui jl start
   if _rc {
     di as err "    FAIL: jl start returned rc=`=_rc'. See message above."
-    di as err "    This usually means Julia was not found by julia.ado."
-    di as err "    Ensure `julia --version` works in a terminal."
-    di as err ""
-    di as err "Cannot continue past this step (need Julia running)."
+    di as err "    Cannot continue past this step (need Julia running)."
     exit
   }
   di as res "    PASS: Julia started."
@@ -77,14 +78,24 @@ program define csdid_jl_diagnose
   * ── 4. Julia version (from the running session) ─────────────
   di as txt ""
   di as txt "[4] Julia version (from the running Julia session)"
-  cap noi _jl: println("    ", VERSION)
-  if _rc di as err "    FAIL: could not query VERSION."
+  cap noi _jl: println(VERSION)
+  if _rc {
+    di as err "    FAIL: could not query VERSION — see error above."
+  }
 
-  * ── 5. Active Pkg env ───────────────────────────────────────
+  * ── 5. Active Julia project (Pkg env) ──────────────────────
+  * NOTE: `import` cannot be inside an expression, so we split into
+  * two independent _jl calls.
   di as txt ""
-  di as txt "[5] Active Julia project"
-  cap noi _jl: (import Pkg; println("    ", Pkg.project().path))
-  if _rc di as err "    FAIL: could not query Pkg.project()."
+  di as txt "[5] Active Julia project (Pkg env)"
+  cap noi _jl: import Pkg
+  if _rc {
+    di as err "    FAIL: import Pkg errored — see above."
+  }
+  else {
+    cap noi _jl: println(Pkg.project().path)
+    if _rc di as err "    FAIL: could not read Pkg.project() — see above."
+  }
 
   * ── 6. Can we import CSDid? ────────────────────────────────
   di as txt ""
@@ -100,23 +111,33 @@ program define csdid_jl_diagnose
     di as res "    PASS: CSDid is importable."
   }
 
-  * ── 7. GitHub reachability (only useful when [6] failed) ──
+  * ── 7. Verify `using CSDid` also brings the API into scope ─
   di as txt ""
-  di as txt "[7] Network: reach github.com"
-  cap noi _jl: try; run(pipeline(`Cmd(["git", "ls-remote", "https://github.com/anzonyquispe/csdidjl", "HEAD"])`, devnull, devnull)); println("    reachable"); catch e; println("    UNREACHABLE: ", e); end
-  if _rc di as err "    FAIL: could not probe network (Julia error above)."
+  di as txt "[7] using CSDid, DataFrames, CategoricalArrays"
+  cap noi _jl: using CSDid, DataFrames, CategoricalArrays
+  if _rc {
+    di as err "    FAIL: `using` failed — see error above."
+    di as err "    This is unusual if [6] passed. Try:  csdid_jl_update"
+  }
+  else {
+    di as res "    PASS: API in scope."
+  }
 
-  * ── 8. globals still in use ────────────────────────────────
+  * ── 8. Environment globals ─────────────────────────────────
   di as txt ""
-  di as txt "[8] Environment globals (all should be empty for a clean install)"
-  foreach g in csdid_jl_loaded csdid_jl_path csdid_jl_julia_lib julia_loaded julia_started {
+  di as txt "[8] Environment globals (from the current Stata session)"
+  local _any = 0
+  foreach g in csdid_jl_loaded csdid_jl_path csdid_jl_julia_lib csdid_jl_github_url csdid_jl_github_subdir csdid_jl_github_rev julia_loaded julia_started {
     if `"$`g'"' != "" {
       di as txt "    $" as res "`g'" as txt " = " as res `"$`g'"'
+      local _any = 1
     }
   }
+  if !`_any' di as txt "    (none set — clean session)"
 
   di as txt ""
   di as txt "═══════════════════════════════════════════════════════════"
-  di as txt " Done. Paste the whole output when asking for help."
+  di as txt " Done. If [4]-[7] all PASS, `csdid_jl` is ready to use."
+  di as txt " Paste this whole output when asking for help."
   di as txt "═══════════════════════════════════════════════════════════"
 end

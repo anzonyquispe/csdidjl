@@ -1,6 +1,8 @@
-*! csdid_jl_load 0.5.1  06jul2026
+*! csdid_jl_load 0.5.2  06jul2026
 *! Loads CSDid.jl into Julia — the reghdfejl pattern.
 *!
+*! v0.5.2: added optional $csdid_jl_github_rev global for branch/tag pinning.
+*!         Useful for pre-merge testing off a feature branch.
 *! v0.5.1: dropped $csdid_jl_loaded fast-path cache; it caused stale-state
 *!         bugs when upgrading from an earlier .ado (e.g. skipped the
 *!         `using CSDid` step and later left CSDid undefined). Now we
@@ -13,8 +15,11 @@ cap program drop csdid_jl_load
 program define csdid_jl_load
   version 15
 
-  * URL + subdir for CSDid.jl on GitHub. Users can override in profile.do
-  * to point at a fork; otherwise the defaults kick in.
+  * URL + subdir + revision for CSDid.jl on GitHub.
+  * Colleagues can override in profile.do:
+  *   global csdid_jl_github_url    "https://github.com/YOUR-FORK/csdidjl"
+  *   global csdid_jl_github_subdir "CSDid.jl"
+  *   global csdid_jl_github_rev    "some-branch-name" // branch or tag; usually leave unset
   if `"$csdid_jl_github_url"' == "" {
     global csdid_jl_github_url "https://github.com/anzonyquispe/csdidjl"
   }
@@ -23,6 +28,7 @@ program define csdid_jl_load
   }
   local repo   `"$csdid_jl_github_url"'
   local subdir `"$csdid_jl_github_subdir"'
+  local rev    `"$csdid_jl_github_rev"'
 
   * ── Start Julia (no-op if already running) ──
   qui jl start
@@ -42,14 +48,21 @@ program define csdid_jl_load
   di as txt " First-run install of CSDid.jl from GitHub"
   di as txt "   Source: `repo'"
   if "`subdir'" != "" di as txt "   Subdir: `subdir'"
+  if "`rev'"    != "" di as txt "   Branch/tag: `rev'"
   di as txt " Julia will download ~30 dependencies and precompile them."
   di as txt " ONE-TIME cost, 5-15 min. Progress shown below."
   di as txt "─────────────────────────────────────────────────────────────"
   mata displayflush()
 
   _jl: import Pkg
-  if "`subdir'" != "" {
+  if "`subdir'" != "" & "`rev'" != "" {
+    cap noi _jl: Pkg.add(url=raw"`repo'", subdir=raw"`subdir'", rev=raw"`rev'")
+  }
+  else if "`subdir'" != "" {
     cap noi _jl: Pkg.add(url=raw"`repo'", subdir=raw"`subdir'")
+  }
+  else if "`rev'" != "" {
+    cap noi _jl: Pkg.add(url=raw"`repo'", rev=raw"`rev'")
   }
   else {
     cap noi _jl: Pkg.add(url=raw"`repo'")
