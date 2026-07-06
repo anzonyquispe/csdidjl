@@ -1,0 +1,391 @@
+
+  ___  ____  ____  ____  ____ ©
+ /__    /   ____/   /   ____/      17.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2021 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Unlimited-user 64-core network perpetual
+Serial number: 18461036
+  Licensed to: TEAM BTCR
+               TEAM BTCR
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000; see help set_maxvar.
+
+. do C:\Users\Usuario\CSDid.jl\run_all_tests.do 
+
+. * ═══════════════════════════════════════════════════════════════
+. *  ARTEFACTO 1 — Stata csdid_jl results for ALL 12 scenarios
+. *  Uses: csdid_jl wrapper (CSDid.jl via Julia plugin)
+. *  Dataset: mpdta (500 counties × 5 years)
+. *  Output: stata_results.csv, stata_aggte_results_full.csv
+. * ═══════════════════════════════════════════════════════════════
+. 
+. set more off
+
+. clear all
+
+. 
+. di "Stata version: `c(stata_version)'"
+Stata version: 17
+
+. di "Mode: `c(mode)'"
+Mode: batch
+
+. di ""
+
+
+. 
+. * ── Setup adopath ──────────────────────────────────────────────
+. adopath + "C:\Users\Usuario\CSDid.jl"
+  [1]  (BASE)      "C:\Program Files\Stata17\ado\base/"
+  [2]  (SITE)      "C:\Program Files\Stata17\ado\site/"
+  [3]              "."
+  [4]  (PERSONAL)  "C:\Users\Usuario\ado\personal/"
+  [5]  (PLUS)      "c:\ado\plus/"
+  [6]  (OLDPLACE)  "c:\ado/"
+  [7]              "C:\Users\Usuario\CSDid.jl"
+
+. 
+. * ── Load data ──────────────────────────────────────────────────
+. import delimited "C:\Users\Usuario\CSDid.jl\data\mpdta.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 2,500 obs)
+
+. * Stata strips dots from variable names: first.treat → firsttreat
+. * csdid_jl expects the gname var; rename for consistency with Julia
+. cap rename firsttreat first_treat
+
+. di "Dataset: mpdta"
+Dataset: mpdta
+
+. di "  Observations: `=_N'"
+  Observations: 2500
+
+. di "  Units: `=r(r)'"
+  Units: .
+
+. qui tab countyreal
+
+. di "  Units: `=r(r)'"
+  Units: 500
+
+. qui tab year
+
+. di "  Periods: `=r(r)'"
+  Periods: 5
+
+. di ""
+
+
+. 
+. * ── Open postfiles ─────────────────────────────────────────────
+. tempname att_h agg_h
+
+. tempfile att_f agg_f
+
+. postfile `att_h' str20 scenario double(group t att se) using `att_f', replace
+(file C:\Users\Usuario\AppData\Local\Temp\ST_12e4_000001.tmp not found)
+
+. postfile `agg_h' str20(scenario agg_type) double(egt att_egt se_egt overall_a
+> tt overall_se) using `agg_f', replace
+(file C:\Users\Usuario\AppData\Local\Temp\ST_12e4_000002.tmp not found)
+
+. 
+. * ── Define scenario components ─────────────────────────────────
+. local methods    dr ipw reg
+
+. local cgroups    nevertreated notyettreated
+
+. local cgshort_nevertreated  nev
+
+. local cgshort_notyettreated nyt
+
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  LOOP OVER ALL 12 SCENARIOS
+. * ═══════════════════════════════════════════════════════════════
+. foreach em of local methods {
+  2.   foreach cg of local cgroups {
+  3.     local cgs = "`cgshort_`cg''"
+  4.     foreach covtype in nocov cov {
+  5. 
+.       local scname "`em'_`cgs'_`covtype'"
+  6. 
+.       if "`covtype'" == "cov" {
+  7.         local covars "lpop"
+  8.       }
+  9.       else {
+ 10.         local covars ""
+ 11.       }
+ 12. 
+.       di ""
+ 13.       di as txt "{hline 70}"
+ 14.       di as txt "=== SCENARIO: `scname' ==="
+ 15.       if "`covtype'" == "cov" {
+ 16.         di as txt "    `=upper("`em'")' | `cg' | xformla=~lpop"
+ 17.       }
+ 18.       else {
+ 19.         di as txt "    `=upper("`em'")' | `cg' | no covariates"
+ 20.       }
+ 21.       di as txt "{hline 70}"
+ 22. 
+.       cap {
+ 23.         * Run csdid_jl
+.         csdid_jl lemp `covars', tname(year) gname(first_treat) ///
+>           idname(countyreal) est_method(`em') control_group(`cg')
+ 24. 
+.         * ── Extract ATT(g,t) results ──
+.         local ngt = e(ngt)
+ 25.         tempname att_m se_m grp_m tt_m
+ 26.         matrix `att_m' = e(att)
+ 27.         matrix `se_m'  = e(se)
+ 28.         matrix `grp_m' = e(group)
+ 29.         matrix `tt_m'  = e(t)
+ 30. 
+.         forvalues i = 1/`ngt' {
+ 31.           local g = `grp_m'[1, `i']
+ 32.           local t = `tt_m'[1, `i']
+ 33.           local a = `att_m'[1, `i']
+ 34.           local s = `se_m'[1, `i']
+ 35.           post `att_h' ("`scname'") (`g') (`t') (`a') (`s')
+ 36.           di as txt "  ATT(g=`=string(`g',"%9.0f")', t=`=string(`t',"%9.0f
+> ")') = " ///
+>             as res %20.15f `a' as txt "  SE = " as res %20.15f `s'
+ 37.         }
+ 38. 
+.         * ── Run aggregations via Julia ──
+.         foreach atype in simple dynamic group calendar {
+ 39.           cap noisily {
+ 40.             _jl: _csdid_agg = CSDid.aggte(_csdid_r; type="`atype'")
+ 41.             _jl: st_numscalar("__ov_att", _csdid_agg.overall_att)
+ 42.             _jl: st_numscalar("__ov_se",  _csdid_agg.overall_se)
+ 43.             _jl: st_numscalar("__nagg",   Float64(length(_csdid_agg.egt)))
+ 44. 
+.             local ov_att = scalar(__ov_att)
+ 45.             local ov_se  = scalar(__ov_se)
+ 46. 
+.             * Post overall row
+.             post `agg_h' ("`scname'") ("`atype'") (.) (.) (.) (`ov_att') (`ov
+> _se')
+ 47.             di as txt "  aggte(`atype'): overall_att = " ///
+>               as res %20.15f `ov_att' as txt "  SE = " as res %20.15f `ov_se'
+ 48. 
+.             * Post detail rows (if any)
+.             local nagg = scalar(__nagg)
+ 49.             if `nagg' > 0 {
+ 50.               _jl: _csdid_agg_egt_v = reshape(_csdid_agg.egt,     1, :)
+ 51.               _jl: _csdid_agg_att_v = reshape(_csdid_agg.att_egt,  1, :)
+ 52.               _jl: _csdid_agg_se_v  = reshape(_csdid_agg.se_egt,   1, :)
+ 53.               jl GetMatFromMat __agg_egt, source(_csdid_agg_egt_v)
+ 54.               jl GetMatFromMat __agg_att, source(_csdid_agg_att_v)
+ 55.               jl GetMatFromMat __agg_se,  source(_csdid_agg_se_v)
+ 56. 
+.               forvalues j = 1/`nagg' {
+ 57.                 local e_j = __agg_egt[1, `j']
+ 58.                 local a_j = __agg_att[1, `j']
+ 59.                 local s_j = __agg_se[1, `j']
+ 60.                 post `agg_h' ("`scname'") ("`atype'") (`e_j') (`a_j') (`s_
+> j') (`ov_att') (`ov_se')
+ 61.               }
+ 62.               cap matrix drop __agg_egt __agg_att __agg_se
+ 63.             }
+ 64.             cap scalar drop __ov_att __ov_se __nagg
+ 65.           }
+ 66.           if _rc {
+ 67.             di as txt "  aggte(`atype'): ERROR (rc=" _rc ")"
+ 68.           }
+ 69.         }
+ 70.       }
+ 71.       if _rc {
+ 72.         di as err "  SCENARIO FAILED (rc=" _rc ")"
+ 73.       }
+ 74.     }
+ 75.   }
+ 76. }
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nev_nocov ===
+    DR | nevertreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039951264397551  SE =    0.012034013161915
+  aggte(dynamic): overall_att =   -0.077239808716405  SE =    0.019964993390716
+  aggte(group): overall_att =   -0.031018272967616  SE =    0.012387167841759
+  aggte(calendar): overall_att =   -0.041700407997252  SE =    0.01597185159431
+> 7
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nev_cov ===
+    DR | nevertreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041751763852876  SE =    0.011502837852874
+  aggte(dynamic): overall_att =   -0.080353938364190  SE =    0.018957559836892
+  aggte(group): overall_att =   -0.032819591714161  SE =    0.011826404487102
+  aggte(calendar): overall_att =   -0.044177333102644  SE =    0.01503817311551
+> 1
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nyt_nocov ===
+    DR | notyettreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039763614667544  SE =    0.012052425060354
+  aggte(dynamic): overall_att =   -0.077399301075358  SE =    0.019560181331754
+  aggte(group): overall_att =   -0.030462219181813  SE =    0.012503093228413
+  aggte(calendar): overall_att =   -0.044267055788231  SE =    0.01557090411477
+> 2
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nyt_cov ===
+    DR | notyettreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041351621045799  SE =    0.011427838777053
+  aggte(dynamic): overall_att =   -0.079992609914254  SE =    0.018494004805777
+  aggte(group): overall_att =   -0.032264033764685  SE =    0.011900399051998
+  aggte(calendar): overall_att =   -0.045664604762940  SE =    0.01469825522754
+> 0
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nev_nocov ===
+    IPW | nevertreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039951264397551  SE =    0.012034013161915
+  aggte(dynamic): overall_att =   -0.077239808716405  SE =    0.019964993390716
+  aggte(group): overall_att =   -0.031018272967616  SE =    0.012387167841759
+  aggte(calendar): overall_att =   -0.041700407997252  SE =    0.01597185159431
+> 7
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nev_cov ===
+    IPW | nevertreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041835152618016  SE =    0.011502214604398
+  aggte(dynamic): overall_att =   -0.080425838889650  SE =    0.018956784603058
+  aggte(group): overall_att =   -0.032927503138447  SE =    0.011827658813286
+  aggte(calendar): overall_att =   -0.044202889407071  SE =    0.01503863622163
+> 9
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nyt_nocov ===
+    IPW | notyettreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039763614667544  SE =    0.012052425060354
+  aggte(dynamic): overall_att =   -0.077399301075358  SE =    0.019560181331754
+  aggte(group): overall_att =   -0.030462219181813  SE =    0.012503093228413
+  aggte(calendar): overall_att =   -0.044267055788231  SE =    0.01557090411477
+> 2
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nyt_cov ===
+    IPW | notyettreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041437398882449  SE =    0.011420897864755
+  aggte(dynamic): overall_att =   -0.080061695843215  SE =    0.018490829772882
+  aggte(group): overall_att =   -0.032374841267465  SE =    0.011899761171183
+  aggte(calendar): overall_att =   -0.045688161279180  SE =    0.01469655001494
+> 9
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nev_nocov ===
+    REG | nevertreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039951264397551  SE =    0.012034013161915
+  aggte(dynamic): overall_att =   -0.077239808716405  SE =    0.019964993390716
+  aggte(group): overall_att =   -0.031018272967616  SE =    0.012387167841759
+  aggte(calendar): overall_att =   -0.041700407997252  SE =    0.01597185159431
+> 7
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nev_cov ===
+    REG | nevertreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041968603434607  SE =    0.011444829346813
+  aggte(dynamic): overall_att =   -0.080781733210126  SE =    0.018745856860117
+  aggte(group): overall_att =   -0.032929233967358  SE =    0.011787229544909
+  aggte(calendar): overall_att =   -0.044532306437019  SE =    0.01488502536373
+> 5
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nyt_nocov ===
+    REG | notyettreated | no covariates
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.039763614667544  SE =    0.012052425060354
+  aggte(dynamic): overall_att =   -0.077399301075358  SE =    0.019560181331754
+  aggte(group): overall_att =   -0.030462219181813  SE =    0.012503093228413
+  aggte(calendar): overall_att =   -0.044267055788231  SE =    0.01557090411477
+> 2
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nyt_cov ===
+    REG | notyettreated | xformla=~lpop
+----------------------------------------------------------------------
+  aggte(simple): overall_att =   -0.041374760874425  SE =    0.011377160947829
+  aggte(dynamic): overall_att =   -0.080248536393838  SE =    0.018319049337234
+  aggte(group): overall_att =   -0.032252266929328  SE =    0.011848625179005
+  aggte(calendar): overall_att =   -0.045677342379374  SE =    0.01460827888720
+> 9
+
+. 
+. * ── Close postfiles and export ─────────────────────────────────
+. postclose `att_h'
+
+. postclose `agg_h'
+
+. 
+. preserve
+
+.   use `att_f', clear
+
+.   export delimited "C:\Users\Usuario\CSDid.jl\stata_results.csv", replace
+(file C:\Users\Usuario\CSDid.jl\stata_results.csv not found)
+file C:\Users\Usuario\CSDid.jl\stata_results.csv saved
+
+.   di ""
+
+
+.   di "Saved `=_N' ATT(g,t) rows to stata_results.csv"
+Saved 144 ATT(g,t) rows to stata_results.csv
+
+. restore
+
+. 
+. preserve
+
+.   use `agg_f', clear
+
+.   export delimited "C:\Users\Usuario\CSDid.jl\stata_aggte_results_full.csv", 
+> replace
+(file C:\Users\Usuario\CSDid.jl\stata_aggte_results_full.csv not found)
+file C:\Users\Usuario\CSDid.jl\stata_aggte_results_full.csv saved
+
+.   di ""
+
+
+.   di "Saved `=_N' aggregation rows to stata_aggte_results_full.csv"
+Saved 216 aggregation rows to stata_aggte_results_full.csv
+
+. restore
+
+. 
+. di ""
+
+
+. di "{hline 70}"
+----------------------------------------------------------------------
+
+. di "DONE: All 12 scenarios completed."
+DONE: All 12 scenarios completed.
+
+. di "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+end of do-file
