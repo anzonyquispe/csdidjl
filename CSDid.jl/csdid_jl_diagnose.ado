@@ -127,7 +127,7 @@ program define csdid_jl_diagnose
   di as txt ""
   di as txt "[8] Environment globals (from the current Stata session)"
   local _any = 0
-  foreach g in csdid_jl_loaded csdid_jl_path csdid_jl_julia_lib csdid_jl_github_url csdid_jl_github_subdir julia_loaded julia_started {
+  foreach g in csdid_jl_loaded csdid_jl_path csdid_jl_julia_lib csdid_jl_github_url csdid_jl_github_subdir csdid_jl_github_rev julia_loaded julia_started {
     if `"$`g'"' != "" {
       di as txt "    $" as res "`g'" as txt " = " as res `"$`g'"'
       local _any = 1
