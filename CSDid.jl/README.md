@@ -97,48 +97,22 @@ If you see a table of ATT(g,t) estimates, you're done.
 
 ## Install (Stata users)
 
-You still need Julia 1.10+ installed first (see Requirements above). Then the
-whole install is **two commands in Stata**.
-
-### Step 1 — install Julia (see Requirements above)
-
-Verify from a **terminal** (Terminal.app on macOS, PowerShell on Windows):
-
-```bash
-julia --version                         # should print 1.10 or newer
-julia -e 'println(dirname(Sys.BINDIR))' # note this path; may need it in Step 3
-```
-
-### Step 2 — install `csdid_jl` in Stata
+**Two commands in Stata. That's the whole install.**
 
 ```stata
 ssc install julia, replace
 net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/csdidjl/main/CSDid.jl/") replace
 ```
 
-That's it. The `.ado` files land in your `PLUS` directory. The first time you call
-`csdid_jl`, it auto-downloads `CSDid.jl` from GitHub into a dedicated Julia environment
-(`~/.julia/environments/csdid_jl/`) — 5–15 min on the first call, seconds afterward.
+The first time you call `csdid_jl`, it downloads `CSDid.jl` from GitHub into your
+Julia install and precompiles the ~30 dependencies (5–15 min, one-time). Every
+call after that starts in seconds.
 
-### Step 3 — one-time Julia lib path (macOS / Linux only, if auto-detect fails)
+Prerequisite: **Julia 1.10+ on your system PATH**. If `julia --version` works from
+a terminal, you're set. If not, install via [juliaup](https://julialang.org/downloads/)
+and the shim adds itself to PATH automatically.
 
-On Windows, Julia is auto-detected in `AppData\Local\Programs\Julia-*`. Nothing to do.
-
-On macOS / Linux, if Julia was installed via [juliaup](https://github.com/JuliaLang/juliaup)
-or into `/Applications/Julia-*.app`, it's auto-detected. Otherwise, add one line to your
-`profile.do`:
-
-```stata
-global csdid_jl_julia_lib "/absolute/path/from/step-1/lib"
-```
-
-Example on Apple Silicon with juliaup:
-
-```stata
-global csdid_jl_julia_lib "/Users/you/.julia/juliaup/julia-1.12.1+0.aarch64.apple.darwin14/lib"
-```
-
-### Step 4 — smoke test (Stata)
+### Smoke test
 
 ```stata
 import delimited "/absolute/path/to/CSDid.jl/data/mpdta.csv", clear
@@ -237,19 +211,21 @@ s   = aggte(r, type="simple")    # single overall ATT
 
 ## Troubleshooting
 
-### `Cannot find libjulia.dll / libjulia.dylib / libjulia.so`
+### Julia not found by `jl start`
 
-The wrapper couldn't locate your Julia install. Find the correct path with:
+Symptom: an error from `jl start` saying it can't locate Julia. This means
+`julia` isn't on your system `PATH`. Install via [juliaup](https://julialang.org/downloads/)
+(recommended — adds itself to `PATH` automatically), or add your existing
+Julia's `bin` directory to `PATH` manually.
+
+Verify with:
 
 ```bash
-julia -e 'println(dirname(Sys.BINDIR))'
+julia --version   # should print 1.10 or newer
 ```
 
-Then in Stata (or `profile.do`), append `/lib` (macOS/Linux) or use `\bin` (Windows):
-
-```stata
-global csdid_jl_julia_lib "/that/path/lib"
-```
+If that works from a fresh terminal, `jl start` will find it. No Stata global
+needs to be set.
 
 ### `Failed to precompile stataplugininterface` — `sys.dylib` not found
 
@@ -374,9 +350,8 @@ CSDid.jl/
 ├── data/
 │   └── mpdta.csv                Callaway–Sant'Anna example data
 ├── csdid_jl.ado                 Main Stata command
-├── csdid_jl_load.ado            Julia environment loader (shared-env pattern)
-├── csdid_jl_update.ado          Companion command to update CSDid.jl in-place
-├── _csdid_jl_start_julia.ado    Julia startup helper (cross-platform)
+├── csdid_jl_load.ado            Julia loader (uses Roodman's `jl start`)
+├── csdid_jl_update.ado          Companion command: pulls latest CSDid.jl
 ├── csdid_jl.sthlp               Stata help file
 ├── stata.toc                    Enables `net install` from GitHub
 ├── csdid_jl.pkg                 Package manifest for `net install`

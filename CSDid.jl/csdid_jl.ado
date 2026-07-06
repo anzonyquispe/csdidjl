@@ -1,16 +1,13 @@
-*! csdid_jl 0.3.0  05jul2026
+*! csdid_jl 0.4.0  06jul2026
 *! Callaway & Sant'Anna (2021) DID estimator via Julia
 *! Wrapper for CSDid.jl following the reghdfejl pattern (Roodman)
+*! v0.4: removed custom Julia startup — now uses `jl start` from julia.ado
+*!       for detection and loading (matches reghdfejl). No manual globals
+*!       required. First-run install of CSDid.jl happens automatically.
 *! v0.3: added parity options with R did::att_gt:
 *!       unbalanced, nobstrap, nocband.
 *! v0.2: added `graph` option — replicates R ggdid plots
 *!       (attgt faceted by group, event study, calendar, group horizontal).
-
-* Julia startup (_julia plugin + _csdid_jl_start_julia) now lives in its
-* own file, _csdid_jl_start_julia.ado, so that `program _julia, plugin`
-* sits at the top level of ITS file rather than being redefined every
-* time csdid_jl.ado is reloaded (which was killing the running Julia
-* session). Stata autoloads it on first call below.
 
 * ═══════════════════════════════════════════════════════════════
 *  Main entry
@@ -33,10 +30,7 @@ program define csdid_jl, eclass
     exit 198
   }
 
-  * Start Julia (with batch mode fallback)
-  _csdid_jl_start_julia
-
-  * Load CSDid.jl project (activates env, loads module)
+  * Start Julia + load CSDid.jl (auto-installs on first use)
   csdid_jl_load
 
   * Run estimator

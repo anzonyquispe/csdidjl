@@ -136,36 +136,27 @@ no separate mode to switch on.{p_end}
 {title:Setup}
 
 {pstd}
-{bf:Requirements:} Julia 1.12+ from {browse "https://julialang.org/downloads/"},
-Stata 17+, and the {cmd:jl} package ({stata ssc install julia}).
+{bf:Requirements:} Julia 1.10+ from {browse "https://julialang.org/downloads/"}
+on your system {bf:PATH}, Stata 17+, and the {cmd:jl} package.
 
 {pstd}
-{bf:First-time setup} (per session, or add to your {cmd:profile.do}):
+{bf:Install (two commands in Stata):}
 
-{phang}{cmd:. adopath + "/path/to/csdidjl"}{p_end}
-
-{pstd}
-On {bf:Windows}, {cmd:csdid_jl} auto-detects Julia in the standard
-{cmd:AppData\Local\Programs\Julia-*} locations.  On {bf:macOS} and
-{bf:Linux}, it auto-detects Julia installed via {browse "https://github.com/JuliaLang/juliaup":juliaup}
-or into {cmd:/Applications/Julia-*.app}.  If auto-detect fails, set:
-
-{phang}{cmd:. global csdid_jl_julia_lib "/path/to/julia/lib"}{p_end}
+{phang}{cmd:. ssc install julia, replace}{p_end}
+{phang}{cmd:. net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/csdidjl/main/CSDid.jl/") replace}{p_end}
 
 {pstd}
-To find the correct path on macOS or Linux, run in a terminal:
-
-{phang}{cmd:. julia -e 'println(dirname(Sys.BINDIR))'}{p_end}
-
-{pstd}
-and append {cmd:/lib} to the result.  On Windows, use the {cmd:bin} subfolder
-containing {cmd:libjulia.dll}.
+That is the entire install.  No manual globals, no {cmd:adopath}, no path
+detection.  Julia is located automatically by Roodman's {cmd:jl start}
+whenever {cmd:julia --version} works in a terminal.
 
 {pstd}
-{bf:First run precompiles the Julia project.}  This takes 5-15 minutes on the
-first call, during which many "Precompiling ..." lines will scroll by in the
-Stata output window.  Subsequent calls start in a few seconds.  Deps
-are installed automatically on first load.
+{bf:First call auto-installs CSDid.jl.}  The first time you run {cmd:csdid_jl},
+it downloads CSDid.jl from GitHub and precompiles ~30 dependencies (5-15 min,
+one-time).  Every call after that starts in seconds.  To update to a newer
+version later:
+
+{phang}{cmd:. csdid_jl_update}{p_end}
 
 
 {marker examples}{...}
