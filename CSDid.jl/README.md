@@ -1,5 +1,8 @@
 # CSDid.jl
 
+[![CI](https://github.com/anzonyquispe/CSDid.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/anzonyquispe/CSDid.jl/actions/workflows/CI.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Julia implementation of the **Callaway & Sant'Anna (2021)** difference-in-differences
 estimator with multiple time periods and staggered treatment adoption, plus a **Stata
 wrapper** (`csdid_jl`) so Stata users can call the fast Julia engine without leaving
@@ -57,15 +60,13 @@ julia> ]                       # enters Pkg mode
 
 ```julia
 julia> ]
-(@v1.10) pkg> add https://github.com/<YOUR-USERNAME>/CSDid.jl
+(@v1.10) pkg> add https://github.com/anzonyquispe/CSDid.jl
 ```
-
-Replace `<YOUR-USERNAME>` with the account that owns the repo.
 
 ### Option C — for local development / testing
 
 ```bash
-git clone https://github.com/<YOUR-USERNAME>/CSDid.jl.git
+git clone https://github.com/anzonyquispe/CSDid.jl.git
 cd CSDid.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 ```
@@ -94,79 +95,48 @@ If you see a table of ATT(g,t) estimates, you're done.
 
 ## Install (Stata users)
 
-This section is for people who want to call `csdid_jl` from Stata. You still need
-Julia 1.10+ installed first.
+You still need Julia 1.10+ installed first (see Requirements above). Then the
+whole install is **two commands in Stata**.
 
 ### Step 1 — install Julia (see Requirements above)
 
 Verify from a **terminal** (Terminal.app on macOS, PowerShell on Windows):
 
 ```bash
-julia --version
-julia -e 'println(dirname(Sys.BINDIR))'    # remember this path!
+julia --version                         # should print 1.10 or newer
+julia -e 'println(dirname(Sys.BINDIR))' # note this path; may need it in Step 3
 ```
 
-The second command prints Julia's install root. You may need it in Step 4.
-
-### Step 2 — install the `jl` Stata package
-
-In Stata:
+### Step 2 — install `csdid_jl` in Stata
 
 ```stata
 ssc install julia, replace
+net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/CSDid.jl/main/") replace
 ```
 
-### Step 3 — get CSDid.jl on your machine
+That's it. The `.ado` files land in your `PLUS` directory. The first time you call
+`csdid_jl`, it auto-downloads `CSDid.jl` from GitHub into a dedicated Julia environment
+(`~/.julia/environments/csdid_jl/`) — 5–15 min on the first call, seconds afterward.
 
-Clone or download this repository:
+### Step 3 — one-time Julia lib path (macOS / Linux only, if auto-detect fails)
 
-```bash
-git clone https://github.com/<YOUR-USERNAME>/CSDid.jl.git ~/CSDid.jl
-```
+On Windows, Julia is auto-detected in `AppData\Local\Programs\Julia-*`. Nothing to do.
 
-Or [download the ZIP from GitHub](https://github.com/<YOUR-USERNAME>/CSDid.jl/archive/refs/heads/main.zip)
-and unzip somewhere permanent (e.g. `~/CSDid.jl` on macOS/Linux, `C:\CSDid.jl` on Windows).
-
-### Step 4 — one-time precompile (recommended)
-
-Run this once in a **terminal** so you see the progress bar (5–15 min):
-
-```bash
-julia --project=/absolute/path/to/CSDid.jl \
-      -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-```
-
-You can skip this — the wrapper will precompile on first Stata call — but doing it up
-front makes the first Stata run look responsive instead of seemingly hung.
-
-### Step 5 — point Stata at CSDid.jl
-
-Add these to your Stata `profile.do` so every session picks them up automatically:
-
-**macOS / Linux (juliaup users):**
+On macOS / Linux, if Julia was installed via [juliaup](https://github.com/JuliaLang/juliaup)
+or into `/Applications/Julia-*.app`, it's auto-detected. Otherwise, add one line to your
+`profile.do`:
 
 ```stata
 global csdid_jl_julia_lib "/absolute/path/from/step-1/lib"
-adopath + "/absolute/path/to/CSDid.jl"
 ```
 
 Example on Apple Silicon with juliaup:
 
 ```stata
 global csdid_jl_julia_lib "/Users/you/.julia/juliaup/julia-1.12.1+0.aarch64.apple.darwin14/lib"
-adopath + "/Users/you/CSDid.jl"
 ```
 
-**Windows:**
-
-```stata
-adopath + "C:/CSDid.jl"
-```
-
-The Windows path is auto-detected — no `csdid_jl_julia_lib` needed if Julia is in the
-default `AppData\Local\Programs\Julia-*` location.
-
-### Step 6 — smoke test (Stata)
+### Step 4 — smoke test (Stata)
 
 ```stata
 import delimited "/absolute/path/to/CSDid.jl/data/mpdta.csv", clear
@@ -187,6 +157,21 @@ Estimator:        dr                         Control group   = nevertreated
 ```
 
 You're done. Type `help csdid_jl` for the full option list.
+
+### Updating to a newer version
+
+Whenever the maintainer pushes a new version, colleagues can update from Stata:
+
+```stata
+* Refresh the .ado files
+net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/CSDid.jl/main/") replace
+
+* Refresh the Julia package (CSDid.jl) in the shared env
+csdid_jl_update
+```
+
+`csdid_jl_update` is a one-liner that runs `Pkg.update("CSDid")` inside the shared
+`csdid_jl` env, then precompiles. No terminal, no git.
 
 ---
 
@@ -387,9 +372,13 @@ CSDid.jl/
 ├── data/
 │   └── mpdta.csv                Callaway–Sant'Anna example data
 ├── csdid_jl.ado                 Main Stata command
-├── csdid_jl_load.ado            Julia environment loader
+├── csdid_jl_load.ado            Julia environment loader (shared-env pattern)
+├── csdid_jl_update.ado          Companion command to update CSDid.jl in-place
 ├── _csdid_jl_start_julia.ado    Julia startup helper (cross-platform)
-└── csdid_jl.sthlp               Stata help file
+├── csdid_jl.sthlp               Stata help file
+├── stata.toc                    Enables `net install` from GitHub
+├── csdid_jl.pkg                 Package manifest for `net install`
+└── .github/workflows/           CI (tests), TagBot, CompatHelper, dependabot
 ```
 
 ---

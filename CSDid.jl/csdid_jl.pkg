@@ -1,0 +1,28 @@
+v 3
+d 'CSDID_JL': Callaway & Sant'Anna DID via Julia (Stata wrapper)
+d
+d Estimates group-time average treatment effects (ATT(g,t)) using the
+d method of Callaway & Sant'Anna (2021, Journal of Econometrics). Wraps
+d the Julia package CSDid.jl, which is auto-installed from GitHub on
+d first use.
+d
+d Requires: Stata 17+, Julia 1.10+, jl (ssc install julia)
+d
+d KW: difference-in-differences
+d KW: DID
+d KW: staggered treatment
+d KW: event study
+d KW: Callaway
+d KW: Sant'Anna
+d KW: julia
+d
+d Author: Anzony Quispe
+d Support: email anzony.quispe@gmail.com
+d
+d Distribution-Date: 20260706
+
+F csdid_jl.ado
+F csdid_jl_load.ado
+F csdid_jl_update.ado
+F _csdid_jl_start_julia.ado
+F csdid_jl.sthlp

@@ -1,0 +1,6 @@
+v 3
+d 'csdid_jl' — Callaway & Sant'Anna DID via Julia
+d Anzony Quispe <anzony.quispe@gmail.com>
+d Stata wrapper around the Julia package CSDid.jl.
+d Distribution-Date: 20260706
+p csdid_jl Callaway & Sant'Anna (2021) DID accelerated by Julia
