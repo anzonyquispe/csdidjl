@@ -24,4 +24,5 @@ d Distribution-Date: 20260706
 F csdid_jl.ado
 F csdid_jl_load.ado
 F csdid_jl_update.ado
+F csdid_jl_diagnose.ado
 F csdid_jl.sthlp

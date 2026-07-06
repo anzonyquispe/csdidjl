@@ -1,4 +1,4 @@
-*! csdid_jl_update 0.2.0  06jul2026
+*! csdid_jl_update 0.2.1  06jul2026
 *! Pulls the latest CSDid.jl from GitHub.
 *!
 *!   . csdid_jl_update
@@ -18,8 +18,5 @@ program define csdid_jl_update
     exit 199
   }
 
-  * Force the next csdid_jl call to re-import the fresh version.
-  global csdid_jl_loaded ""
-
-  di as txt "CSDid.jl updated. Run any csdid_jl command to load the new version."
+  di as txt "CSDid.jl updated. Run any csdid_jl command to use the new version."
 end
