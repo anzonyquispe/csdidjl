@@ -14,12 +14,17 @@ program define csdid_jl_load
   * Fast path: already loaded in this Stata session
   if `"$csdid_jl_loaded"' != "" exit
 
-  * URL for CSDid.jl on GitHub. Colleagues can override in profile.do:
-  *   global csdid_jl_github_url "https://github.com/YOUR-FORK/CSDid.jl"
+  * URL + subdir for CSDid.jl on GitHub. Colleagues can override in profile.do:
+  *   global csdid_jl_github_url    "https://github.com/YOUR-FORK/csdidjl"
+  *   global csdid_jl_github_subdir "CSDid.jl"    // "" if Project.toml at repo root
   if `"$csdid_jl_github_url"' == "" {
-    global csdid_jl_github_url "https://github.com/anzonyquispe/CSDid.jl"
+    global csdid_jl_github_url "https://github.com/anzonyquispe/csdidjl"
   }
-  local repo `"$csdid_jl_github_url"'
+  if `"$csdid_jl_github_subdir"' == "" {
+    global csdid_jl_github_subdir "CSDid.jl"
+  }
+  local repo   `"$csdid_jl_github_url"'
+  local subdir `"$csdid_jl_github_subdir"'
 
   * ── Activate a dedicated shared Julia environment ──
   * shared=true puts it under ~/.julia/environments/csdid_jl so we don't
@@ -32,7 +37,12 @@ program define csdid_jl_load
   if _rc {
     di as txt "(First run: installing CSDid.jl from `repo' — 5-15 min)"
     mata displayflush()
-    _jl: Pkg.add(url=raw"`repo'"; io=devnull);
+    if "`subdir'" != "" {
+      _jl: Pkg.add(url=raw"`repo'", subdir=raw"`subdir'"; io=devnull);
+    }
+    else {
+      _jl: Pkg.add(url=raw"`repo'"; io=devnull);
+    }
   }
 
   * ── Instantiate to pull any missing deps (no-op after first run) ──
