@@ -1,6 +1,6 @@
 # CSDid.jl
 
-[![CI](https://github.com/anzonyquispe/CSDid.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/anzonyquispe/CSDid.jl/actions/workflows/CI.yml)
+[![CI](https://github.com/anzonyquispe/csdidjl/actions/workflows/CI.yml/badge.svg)](https://github.com/anzonyquispe/csdidjl/actions/workflows/CI.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Julia implementation of the **Callaway & Sant'Anna (2021)** difference-in-differences
@@ -60,14 +60,16 @@ julia> ]                       # enters Pkg mode
 
 ```julia
 julia> ]
-(@v1.10) pkg> add https://github.com/anzonyquispe/CSDid.jl
+(@v1.10) pkg> add https://github.com/anzonyquispe/csdidjl.git:CSDid.jl
 ```
+
+The `:CSDid.jl` suffix tells Julia the package lives in that subfolder of the repo.
 
 ### Option C — for local development / testing
 
 ```bash
-git clone https://github.com/anzonyquispe/CSDid.jl.git
-cd CSDid.jl
+git clone https://github.com/anzonyquispe/csdidjl.git
+cd csdidjl/CSDid.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 ```
 
@@ -111,7 +113,7 @@ julia -e 'println(dirname(Sys.BINDIR))' # note this path; may need it in Step 3
 
 ```stata
 ssc install julia, replace
-net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/CSDid.jl/main/") replace
+net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/csdidjl/main/CSDid.jl/") replace
 ```
 
 That's it. The `.ado` files land in your `PLUS` directory. The first time you call
@@ -164,7 +166,7 @@ Whenever the maintainer pushes a new version, colleagues can update from Stata:
 
 ```stata
 * Refresh the .ado files
-net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/CSDid.jl/main/") replace
+net install csdid_jl, from("https://raw.githubusercontent.com/anzonyquispe/csdidjl/main/CSDid.jl/") replace
 
 * Refresh the Julia package (CSDid.jl) in the shared env
 csdid_jl_update
