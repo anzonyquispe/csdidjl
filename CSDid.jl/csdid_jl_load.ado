@@ -1,5 +1,8 @@
-*! csdid_jl_load 0.4.0  06jul2026
+*! csdid_jl_load 0.4.1  06jul2026
 *! Loads Julia environment for csdid_jl
+*! v0.4.1: Pkg.add errors are no longer swallowed by io=devnull; users see
+*!         real Julia errors (bad URL, no network, old Julia) instead of a
+*!         cryptic "Package CSDid not found" downstream.
 *! v0.4: shared-env install pattern. CSDid.jl is auto-installed from GitHub
 *!       on first use into a dedicated Julia env, so the .ado files can be
 *!       distributed standalone via `net install`. No co-located Project.toml
@@ -35,20 +38,50 @@ program define csdid_jl_load
   * ── Ensure CSDid is installed in this env ──
   cap _jl: import CSDid
   if _rc {
-    di as txt "(First run: installing CSDid.jl from `repo' — 5-15 min)"
+    di as txt ""
+    di as txt "──────────────────────────────────────────────────────────────"
+    di as txt " First-run install: fetching CSDid.jl from GitHub."
+    di as txt "   Source: `repo'"
+    if "`subdir'" != "" di as txt "   Subdir: `subdir'"
+    di as txt " Julia will download ~30 dependencies and precompile them."
+    di as txt " This is a ONE-TIME cost, 5–15 min. Progress shown below."
+    di as txt "──────────────────────────────────────────────────────────────"
     mata displayflush()
+
+    * Do NOT suppress output — the user needs to see progress and any error.
     if "`subdir'" != "" {
-      _jl: Pkg.add(url=raw"`repo'", subdir=raw"`subdir'"; io=devnull);
+      cap noi _jl: Pkg.add(url=raw"`repo'", subdir=raw"`subdir'")
     }
     else {
-      _jl: Pkg.add(url=raw"`repo'"; io=devnull);
+      cap noi _jl: Pkg.add(url=raw"`repo'")
+    }
+    if _rc {
+      di as err ""
+      di as err "Pkg.add failed. Common causes:"
+      di as err "  • No internet connection"
+      di as err "  • Wrong repo URL: check {stata di \"\$csdid_jl_github_url\"}"
+      di as err "  • Wrong subdir: check {stata di \"\$csdid_jl_github_subdir\"}"
+      di as err "  • Julia version too old (need 1.10+; you can check with"
+      di as err `"       . julia -e "println(VERSION)")"'
+      exit 199
     }
   }
 
-  * ── Instantiate to pull any missing deps (no-op after first run) ──
-  _jl: Pkg.instantiate(; io=devnull);
+  * ── Instantiate to pull any missing deps (silent no-op after first run) ──
+  cap noi _jl: Pkg.instantiate()
+  if _rc {
+    di as err "Pkg.instantiate failed. See error above."
+    exit 199
+  }
 
-  _jl: using CSDid, DataFrames, CategoricalArrays;
+  * ── Load CSDid and its data-transfer helpers ──
+  cap noi _jl: using CSDid, DataFrames, CategoricalArrays
+  if _rc {
+    di as err ""
+    di as err "using CSDid failed even after Pkg.add succeeded. This is unusual."
+    di as err "Try:  {stata csdid_jl_update}   to force a clean re-install."
+    exit 199
+  }
 
   * ── Load stataplugininterface (needed for jl PutVarsToDF) ──
   if `"$julia_loaded"' == "" {
