@@ -1,0 +1,2323 @@
+
+  ___  ____  ____  ____  ____ ©
+ /__    /   ____/   /   ____/      17.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2021 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Unlimited-user 64-core network perpetual
+Serial number: 18461036
+  Licensed to: TEAM BTCR
+               TEAM BTCR
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000; see help set_maxvar.
+
+. do C:\Users\Usuario\CSDid.jl\run_all_tests.do 
+
+. * ═══════════════════════════════════════════════════════════════
+. *  Stata csdid_jl results — ALL scenarios
+. *  Uses: csdid_jl wrapper (CSDid.jl via Julia plugin)
+. *  Datasets: mpdta, sim_data, mpdta_tvw, mpdta_extra, factor_cov,
+. *            tp2_const–tp10_const
+. *  Output: stata_results.csv, stata_aggte_results_full.csv
+. * ═══════════════════════════════════════════════════════════════
+. 
+. set more off
+
+. clear all
+
+. 
+. di "Stata version: `c(stata_version)'"
+Stata version: 17
+
+. di "Mode: `c(mode)'"
+Mode: batch
+
+. di ""
+
+
+. 
+. * ── Setup adopath ──────────────────────────────────────────────
+. * Run this .do file from the CSDid.jl project directory.
+. local projdir "`c(pwd)'"
+
+. adopath + "`projdir'"
+  [1]  (BASE)      "C:\Program Files\Stata17\ado\base/"
+  [2]  (SITE)      "C:\Program Files\Stata17\ado\site/"
+  [3]              "."
+  [4]  (PERSONAL)  "C:\Users\Usuario\ado\personal/"
+  [5]  (PLUS)      "c:\ado\plus/"
+  [6]  (OLDPLACE)  "c:\ado/"
+  [7]              "C:\Users\Usuario\CSDid.jl"
+
+. local dpath "`projdir'/data"
+
+. 
+. * ── Open postfiles ─────────────────────────────────────────────
+. tempname att_h agg_h
+
+. tempfile att_f agg_f
+
+. postfile `att_h' str60 scenario double(group t att se) using `att_f', replace
+(file C:\Users\Usuario\AppData\Local\Temp\ST_35f8_000001.tmp not found)
+
+. postfile `agg_h' str60(scenario agg_type) double(egt att_egt se_egt overall_a
+> tt overall_se) using `agg_f', replace
+(file C:\Users\Usuario\AppData\Local\Temp\ST_35f8_000002.tmp not found)
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 1: mpdta 12-scenario grid (3 methods × 2 cg × 2 cov)
+. * ═══════════════════════════════════════════════════════════════
+. 
+. import delimited "`dpath'/mpdta.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 2,500 obs)
+
+. cap rename firsttreat first_treat
+
+. di "Dataset: mpdta  N=`=_N'"
+Dataset: mpdta  N=2500
+
+. 
+. local methods    dr ipw reg
+
+. local cgroups    nevertreated notyettreated
+
+. local cgshort_nevertreated  nev
+
+. local cgshort_notyettreated nyt
+
+. 
+. foreach em of local methods {
+  2.   foreach cg of local cgroups {
+  3.     local cgs = "`cgshort_`cg''"
+  4.     foreach covtype in nocov cov {
+  5.       local scname "`em'_`cgs'_`covtype'"
+  6. 
+.       if "`covtype'" == "cov" {
+  7.         local covars "lpop"
+  8.       }
+  9.       else {
+ 10.         local covars ""
+ 11.       }
+ 12. 
+.       di ""
+ 13.       di as txt "{hline 70}"
+ 14.       di as txt "=== SCENARIO: `scname' ==="
+ 15.       di as txt "{hline 70}"
+ 16. 
+.       cap noisily {
+ 17.         csdid_jl lemp `covars', tname(year) gname(first_treat) ///
+>           idname(countyreal) est_method(`em') control_group(`cg')
+ 18. 
+.         * ── Extract ATT(g,t) results ──
+.         local ngt = e(ngt)
+ 19.         tempname att_m se_m grp_m tt_m
+ 20.         matrix `att_m' = e(att)
+ 21.         matrix `se_m'  = e(se)
+ 22.         matrix `grp_m' = e(group)
+ 23.         matrix `tt_m'  = e(t)
+ 24. 
+.         forvalues i = 1/`ngt' {
+ 25.           local g = `grp_m'[1, `i']
+ 26.           local t = `tt_m'[1, `i']
+ 27.           local a = `att_m'[1, `i']
+ 28.           local s = `se_m'[1, `i']
+ 29.           post `att_h' ("`scname'") (`g') (`t') (`a') (`s')
+ 30.         }
+ 31.         di as txt "  Posted `ngt' ATT(g,t) rows"
+ 32. 
+.         * ── Run aggregations via Julia ──
+.         foreach atype in simple dynamic group calendar {
+ 33.           cap noisily {
+ 34.             _jl: _csdid_agg = CSDid.aggte(_csdid_r; type="`atype'")
+ 35.             _jl: st_numscalar("__ov_att", _csdid_agg.overall_att)
+ 36.             _jl: st_numscalar("__ov_se",  _csdid_agg.overall_se)
+ 37.             _jl: st_numscalar("__nagg",   Float64(length(_csdid_agg.egt)))
+ 38. 
+.             local ov_att = scalar(__ov_att)
+ 39.             local ov_se  = scalar(__ov_se)
+ 40. 
+.             post `agg_h' ("`scname'") ("`atype'") (.) (.) (.) (`ov_att') (`ov
+> _se')
+ 41. 
+.             local nagg = scalar(__nagg)
+ 42.             if `nagg' > 0 {
+ 43.               _jl: _csdid_agg_egt_v = reshape(_csdid_agg.egt,     1, :)
+ 44.               _jl: _csdid_agg_att_v = reshape(_csdid_agg.att_egt,  1, :)
+ 45.               _jl: _csdid_agg_se_v  = reshape(_csdid_agg.se_egt,   1, :)
+ 46.               jl GetMatFromMat __agg_egt, source(_csdid_agg_egt_v)
+ 47.               jl GetMatFromMat __agg_att, source(_csdid_agg_att_v)
+ 48.               jl GetMatFromMat __agg_se,  source(_csdid_agg_se_v)
+ 49. 
+.               forvalues j = 1/`nagg' {
+ 50.                 local e_j = __agg_egt[1, `j']
+ 51.                 local a_j = __agg_att[1, `j']
+ 52.                 local s_j = __agg_se[1, `j']
+ 53.                 post `agg_h' ("`scname'") ("`atype'") (`e_j') (`a_j') (`s_
+> j') (`ov_att') (`ov_se')
+ 54.               }
+ 55.               cap matrix drop __agg_egt __agg_att __agg_se
+ 56.             }
+ 57.             cap scalar drop __ov_att __ov_se __nagg
+ 58.           }
+ 59.           if _rc {
+ 60.             di as txt "  aggte(`atype'): ERROR (rc=" _rc ")"
+ 61.           }
+ 62.         }
+ 63.       }
+ 64.       if _rc {
+ 65.         di as err "  SCENARIO FAILED (rc=" _rc ")"
+ 66.       }
+ 67.     }
+ 68.   }
+ 69. }
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nev_nocov ===
+----------------------------------------------------------------------
+Starting Julia from C:\Users\Usuario\AppData\Local\Programs\Julia-1.12.6\bin ..
+> .
+(Julia started successfully — no console windows)
+(CSDid.jl loaded from C:/Users/Usuario/CSDid.jl)
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         dr                            Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0105      0.0233      -0.0749      0.0539            
+  2004  2005 |     -0.0704      0.0310      -0.1563      0.0154            
+  2004  2006 |     -0.1373      0.0364      -0.2382     -0.0363            *
+  2004  2007 |     -0.1008      0.0344      -0.1960     -0.0056            *
+  2006  2004 |      0.0065      0.0233      -0.0581      0.0711            
+  2006  2005 |     -0.0028      0.0196      -0.0569      0.0514            
+  2006  2006 |     -0.0046      0.0178      -0.0538      0.0446            
+  2006  2007 |     -0.0412      0.0202      -0.0973      0.0148            
+  2007  2004 |      0.0305      0.0150      -0.0111      0.0722            
+  2007  2005 |     -0.0027      0.0164      -0.0482      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0806      0.0184            
+  2007  2007 |     -0.0261      0.0167      -0.0722      0.0201            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nev_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0145      0.0221      -0.0761      0.0471            
+  2004  2005 |     -0.0764      0.0287      -0.1562      0.0034            
+  2004  2006 |     -0.1404      0.0354      -0.2389     -0.0420            *
+  2004  2007 |     -0.1069      0.0329      -0.1984     -0.0154            *
+  2006  2004 |     -0.0005      0.0222      -0.0623      0.0614            
+  2006  2005 |     -0.0062      0.0185      -0.0577      0.0453            
+  2006  2006 |      0.0010      0.0194      -0.0530      0.0550            
+  2006  2007 |     -0.0413      0.0197      -0.0962      0.0136            
+  2007  2004 |      0.0267      0.0141      -0.0124      0.0659            
+  2007  2005 |     -0.0046      0.0157      -0.0483      0.0392            
+  2007  2006 |     -0.0284      0.0182      -0.0791      0.0222            
+  2007  2007 |     -0.0288      0.0162      -0.0740      0.0164            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nyt_nocov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         dr                            Control group  = notyettreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0194      0.0223      -0.0822      0.0435            
+  2004  2005 |     -0.0783      0.0304      -0.1639      0.0073            
+  2004  2006 |     -0.1363      0.0354      -0.2360     -0.0366            *
+  2004  2007 |     -0.1008      0.0344      -0.1976     -0.0040            *
+  2006  2004 |     -0.0026      0.0225      -0.0660      0.0609            
+  2006  2005 |     -0.0019      0.0190      -0.0556      0.0517            
+  2006  2006 |      0.0047      0.0163      -0.0414      0.0507            
+  2006  2007 |     -0.0412      0.0202      -0.0982      0.0158            
+  2007  2004 |      0.0298      0.0145      -0.0112      0.0707            
+  2007  2005 |     -0.0024      0.0160      -0.0476      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0814      0.0193            
+  2007  2007 |     -0.0261      0.0167      -0.0730      0.0209            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: dr_nyt_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0212      0.0216      -0.0818      0.0394            
+  2004  2005 |     -0.0816      0.0283      -0.1609     -0.0023            *
+  2004  2006 |     -0.1382      0.0342      -0.2340     -0.0424            *
+  2004  2007 |     -0.1069      0.0329      -0.1990     -0.0148            *
+  2006  2004 |     -0.0075      0.0218      -0.0686      0.0537            
+  2006  2005 |     -0.0046      0.0183      -0.0558      0.0466            
+  2006  2006 |      0.0087      0.0168      -0.0385      0.0558            
+  2006  2007 |     -0.0413      0.0197      -0.0965      0.0139            
+  2007  2004 |      0.0269      0.0139      -0.0120      0.0659            
+  2007  2005 |     -0.0042      0.0155      -0.0477      0.0393            
+  2007  2006 |     -0.0284      0.0182      -0.0793      0.0224            
+  2007  2007 |     -0.0288      0.0162      -0.0742      0.0167            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nev_nocov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         ipw                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0105      0.0233      -0.0749      0.0539            
+  2004  2005 |     -0.0704      0.0310      -0.1563      0.0154            
+  2004  2006 |     -0.1373      0.0364      -0.2382     -0.0363            *
+  2004  2007 |     -0.1008      0.0344      -0.1960     -0.0056            *
+  2006  2004 |      0.0065      0.0233      -0.0581      0.0711            
+  2006  2005 |     -0.0028      0.0196      -0.0569      0.0514            
+  2006  2006 |     -0.0046      0.0178      -0.0538      0.0446            
+  2006  2007 |     -0.0412      0.0202      -0.0973      0.0148            
+  2007  2004 |      0.0305      0.0150      -0.0111      0.0722            
+  2007  2005 |     -0.0027      0.0164      -0.0482      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0806      0.0184            
+  2007  2007 |     -0.0261      0.0167      -0.0722      0.0201            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nev_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         ipw                           Control group  = nevertreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0145      0.0221      -0.0761      0.0470            
+  2004  2005 |     -0.0764      0.0286      -0.1562      0.0033            
+  2004  2006 |     -0.1405      0.0354      -0.2389     -0.0420            *
+  2004  2007 |     -0.1069      0.0329      -0.1985     -0.0154            *
+  2006  2004 |     -0.0009      0.0222      -0.0625      0.0608            
+  2006  2005 |     -0.0064      0.0185      -0.0578      0.0450            
+  2006  2006 |      0.0012      0.0195      -0.0530      0.0555            
+  2006  2007 |     -0.0413      0.0197      -0.0962      0.0136            
+  2007  2004 |      0.0266      0.0140      -0.0125      0.0656            
+  2007  2005 |     -0.0047      0.0157      -0.0483      0.0390            
+  2007  2006 |     -0.0283      0.0182      -0.0790      0.0223            
+  2007  2007 |     -0.0289      0.0162      -0.0741      0.0163            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nyt_nocov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         ipw                           Control group  = notyettreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0194      0.0223      -0.0822      0.0435            
+  2004  2005 |     -0.0783      0.0304      -0.1639      0.0073            
+  2004  2006 |     -0.1363      0.0354      -0.2360     -0.0366            *
+  2004  2007 |     -0.1008      0.0344      -0.1976     -0.0040            *
+  2006  2004 |     -0.0026      0.0225      -0.0660      0.0609            
+  2006  2005 |     -0.0019      0.0190      -0.0556      0.0517            
+  2006  2006 |      0.0047      0.0163      -0.0414      0.0507            
+  2006  2007 |     -0.0412      0.0202      -0.0982      0.0158            
+  2007  2004 |      0.0298      0.0145      -0.0112      0.0707            
+  2007  2005 |     -0.0024      0.0160      -0.0476      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0814      0.0193            
+  2007  2007 |     -0.0261      0.0167      -0.0730      0.0209            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: ipw_nyt_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         ipw                           Control group  = notyettreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0212      0.0216      -0.0817      0.0393            
+  2004  2005 |     -0.0816      0.0283      -0.1608     -0.0024            *
+  2004  2006 |     -0.1382      0.0342      -0.2338     -0.0426            *
+  2004  2007 |     -0.1069      0.0329      -0.1988     -0.0150            *
+  2006  2004 |     -0.0076      0.0218      -0.0685      0.0533            
+  2006  2005 |     -0.0047      0.0183      -0.0557      0.0464            
+  2006  2006 |      0.0088      0.0169      -0.0383      0.0559            
+  2006  2007 |     -0.0413      0.0197      -0.0964      0.0138            
+  2007  2004 |      0.0268      0.0139      -0.0120      0.0657            
+  2007  2005 |     -0.0043      0.0155      -0.0476      0.0391            
+  2007  2006 |     -0.0283      0.0182      -0.0792      0.0225            
+  2007  2007 |     -0.0289      0.0162      -0.0743      0.0165            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nev_nocov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0105      0.0233      -0.0749      0.0539            
+  2004  2005 |     -0.0704      0.0310      -0.1563      0.0154            
+  2004  2006 |     -0.1373      0.0364      -0.2382     -0.0363            *
+  2004  2007 |     -0.1008      0.0344      -0.1960     -0.0056            *
+  2006  2004 |      0.0065      0.0233      -0.0581      0.0711            
+  2006  2005 |     -0.0028      0.0196      -0.0569      0.0514            
+  2006  2006 |     -0.0046      0.0178      -0.0538      0.0446            
+  2006  2007 |     -0.0412      0.0202      -0.0973      0.0148            
+  2007  2004 |      0.0305      0.0150      -0.0111      0.0722            
+  2007  2005 |     -0.0027      0.0164      -0.0482      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0806      0.0184            
+  2007  2007 |     -0.0261      0.0167      -0.0722      0.0201            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nev_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0149      0.0221      -0.0757      0.0459            
+  2004  2005 |     -0.0770      0.0284      -0.1552      0.0012            
+  2004  2006 |     -0.1411      0.0348      -0.2372     -0.0450            *
+  2004  2007 |     -0.1075      0.0327      -0.1978     -0.0173            *
+  2006  2004 |     -0.0021      0.0221      -0.0631      0.0589            
+  2006  2005 |     -0.0070      0.0183      -0.0576      0.0436            
+  2006  2006 |      0.0008      0.0192      -0.0522      0.0537            
+  2006  2007 |     -0.0415      0.0197      -0.0959      0.0128            
+  2007  2004 |      0.0264      0.0140      -0.0123      0.0650            
+  2007  2005 |     -0.0048      0.0157      -0.0480      0.0385            
+  2007  2006 |     -0.0285      0.0181      -0.0785      0.0215            
+  2007  2007 |     -0.0288      0.0162      -0.0734      0.0158            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nyt_nocov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = notyettreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0194      0.0223      -0.0822      0.0435            
+  2004  2005 |     -0.0783      0.0304      -0.1639      0.0073            
+  2004  2006 |     -0.1363      0.0354      -0.2360     -0.0366            *
+  2004  2007 |     -0.1008      0.0344      -0.1976     -0.0040            *
+  2006  2004 |     -0.0026      0.0225      -0.0660      0.0609            
+  2006  2005 |     -0.0019      0.0190      -0.0556      0.0517            
+  2006  2006 |      0.0047      0.0163      -0.0414      0.0507            
+  2006  2007 |     -0.0412      0.0202      -0.0982      0.0158            
+  2007  2004 |      0.0298      0.0145      -0.0112      0.0707            
+  2007  2005 |     -0.0024      0.0160      -0.0476      0.0427            
+  2007  2006 |     -0.0311      0.0179      -0.0814      0.0193            
+  2007  2007 |     -0.0261      0.0167      -0.0730      0.0209            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: reg_nyt_cov ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        lpop
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0212      0.0216      -0.0821      0.0396            
+  2004  2005 |     -0.0818      0.0281      -0.1610     -0.0027            *
+  2004  2006 |     -0.1385      0.0339      -0.2339     -0.0431            *
+  2004  2007 |     -0.1075      0.0327      -0.1997     -0.0154            *
+  2006  2004 |     -0.0081      0.0218      -0.0694      0.0532            
+  2006  2005 |     -0.0062      0.0180      -0.0570      0.0445            
+  2006  2006 |      0.0094      0.0169      -0.0382      0.0570            
+  2006  2007 |     -0.0415      0.0197      -0.0970      0.0140            
+  2007  2004 |      0.0267      0.0139      -0.0124      0.0658            
+  2007  2005 |     -0.0043      0.0155      -0.0480      0.0394            
+  2007  2006 |     -0.0285      0.0181      -0.0795      0.0225            
+  2007  2007 |     -0.0288      0.0162      -0.0743      0.0167            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 2: sim_nev_dr  (sim_data.csv, DR, nevertreated, cov=X)
+. * ═══════════════════════════════════════════════════════════════
+. 
+. import delimited "`dpath'/sim_data.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(7 vars, 15,916 obs)
+
+. di "Dataset: sim_data  N=`=_N'"
+Dataset: sim_data  N=15916
+
+. di "Variables: " _continue
+Variables: 
+. describe, short
+
+Contains data
+ Observations:        15,916                  
+    Variables:             7                  
+Sorted by: 
+     Note: Dataset has changed since last saved.
+
+. 
+. di ""
+
+
+. di as txt "{hline 70}"
+----------------------------------------------------------------------
+
+. di as txt "=== SCENARIO: sim_nev_dr ==="
+=== SCENARIO: sim_nev_dr ===
+
+. di as txt "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+. cap noisily {
+.   csdid_jl y x, tname(period) gname(g) idname(id) ///
+>     est_method(dr) control_group(nevertreated)
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    15,916
+Outcome variable:  y                             Number of units =     3,979
+                                                 Num. (g,t) cells =      9
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.9209      0.0639       0.7404      1.1015            *
+     2     3 |      1.9875      0.0645       1.8052      2.1698            *
+     2     4 |      2.9552      0.0631       2.7770      3.1334            *
+     3     2 |     -0.0433      0.0656      -0.2285      0.1419            
+     3     3 |      1.1080      0.0652       0.9238      1.2923            *
+     3     4 |      2.0590      0.0652       1.8748      2.2432            *
+     4     2 |      0.0023      0.0678      -0.1891      0.1938            
+     4     3 |      0.0615      0.0660      -0.1249      0.2480            
+     4     4 |      0.9523      0.0670       0.7630      1.1416            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+. 
+.   local ngt = e(ngt)
+.   tempname att_m se_m grp_m tt_m
+.   matrix `att_m' = e(att)
+.   matrix `se_m'  = e(se)
+.   matrix `grp_m' = e(group)
+.   matrix `tt_m'  = e(t)
+. 
+.   forvalues i = 1/`ngt' {
+  2.     local g = `grp_m'[1, `i']
+  3.     local t = `tt_m'[1, `i']
+  4.     local a = `att_m'[1, `i']
+  5.     local s = `se_m'[1, `i']
+  6.     post `att_h' ("sim_nev_dr") (`g') (`t') (`a') (`s')
+  7.   }
+.   di as txt "  Posted `ngt' ATT(g,t) rows"
+  Posted 9 ATT(g,t) rows
+. 
+.   * ── Aggregations ──
+.   foreach atype in simple dynamic group calendar {
+  2.     cap noisily {
+  3.       _jl: _csdid_agg = CSDid.aggte(_csdid_r; type="`atype'")
+  4.       _jl: st_numscalar("__ov_att", _csdid_agg.overall_att)
+  5.       _jl: st_numscalar("__ov_se",  _csdid_agg.overall_se)
+  6.       _jl: st_numscalar("__nagg",   Float64(length(_csdid_agg.egt)))
+  7. 
+.       local ov_att = scalar(__ov_att)
+  8.       local ov_se  = scalar(__ov_se)
+  9. 
+.       post `agg_h' ("sim_nev_dr") ("`atype'") (.) (.) (.) (`ov_att') (`ov_se'
+> )
+ 10. 
+.       local nagg = scalar(__nagg)
+ 11.       if `nagg' > 0 {
+ 12.         _jl: _csdid_agg_egt_v = reshape(_csdid_agg.egt,     1, :)
+ 13.         _jl: _csdid_agg_att_v = reshape(_csdid_agg.att_egt,  1, :)
+ 14.         _jl: _csdid_agg_se_v  = reshape(_csdid_agg.se_egt,   1, :)
+ 15.         jl GetMatFromMat __agg_egt, source(_csdid_agg_egt_v)
+ 16.         jl GetMatFromMat __agg_att, source(_csdid_agg_att_v)
+ 17.         jl GetMatFromMat __agg_se,  source(_csdid_agg_se_v)
+ 18. 
+.         forvalues j = 1/`nagg' {
+ 19.           local e_j = __agg_egt[1, `j']
+ 20.           local a_j = __agg_att[1, `j']
+ 21.           local s_j = __agg_se[1, `j']
+ 22.           post `agg_h' ("sim_nev_dr") ("`atype'") (`e_j') (`a_j') (`s_j') 
+> (`ov_att') (`ov_se')
+ 23.         }
+ 24.         cap matrix drop __agg_egt __agg_att __agg_se
+ 25.       }
+ 26.       cap scalar drop __ov_att __ov_se __nagg
+ 27.     }
+ 28.     if _rc {
+ 29.       di as txt "  aggte(`atype'): ERROR (rc=" _rc ")"
+ 30.     }
+ 31.   }
+. }
+
+. if _rc {
+.   di as err "  SCENARIO FAILED (rc=" _rc ")"
+. }
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 3: fix_weights (mpdta_tvw.csv, REG, nevertreated, wt)
+. *  Tags: none, base, first, varying
+. * ═══════════════════════════════════════════════════════════════
+. 
+. import delimited "`dpath'/mpdta_tvw.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(7 vars, 2,500 obs)
+
+. cap rename firsttreat first_treat
+
+. di "Dataset: mpdta_tvw  N=`=_N'"
+Dataset: mpdta_tvw  N=2500
+
+. 
+. local fw_tags       none base first varying
+
+. local fw_scn_none     fix_weights_none
+
+. local fw_scn_base     fix_weights_base
+
+. local fw_scn_first    fix_weights_first
+
+. local fw_scn_varying  fix_weights_varying
+
+. local fw_opt_none
+
+. local fw_opt_base     fix_weights(base_period)
+
+. local fw_opt_first    fix_weights(first_period)
+
+. local fw_opt_varying  fix_weights(varying)
+
+. 
+. foreach fwt of local fw_tags {
+  2.   local scname "`fw_scn_`fwt''"
+  3.   local fwopts "`fw_opt_`fwt''"
+  4. 
+.   di ""
+  5.   di as txt "{hline 70}"
+  6.   di as txt "=== SCENARIO: `scname' ==="
+  7.   di as txt "{hline 70}"
+  8. 
+.   cap noisily {
+  9.     csdid_jl lemp, tname(year) gname(first_treat) idname(countyreal) ///
+>       est_method(reg) control_group(nevertreated) weights(wt) `fwopts'
+ 10. 
+.     local ngt = e(ngt)
+ 11.     tempname att_m se_m grp_m tt_m
+ 12.     matrix `att_m' = e(att)
+ 13.     matrix `se_m'  = e(se)
+ 14.     matrix `grp_m' = e(group)
+ 15.     matrix `tt_m'  = e(t)
+ 16. 
+.     forvalues i = 1/`ngt' {
+ 17.       local g = `grp_m'[1, `i']
+ 18.       local t = `tt_m'[1, `i']
+ 19.       local a = `att_m'[1, `i']
+ 20.       local s = `se_m'[1, `i']
+ 21.       post `att_h' ("`scname'") (`g') (`t') (`a') (`s')
+ 22.     }
+ 23.     di as txt "  Posted `ngt' ATT(g,t) rows"
+ 24.   }
+ 25.   if _rc {
+ 26.     di as err "  SCENARIO FAILED (rc=" _rc ")"
+ 27.   }
+ 28. }
+
+----------------------------------------------------------------------
+=== SCENARIO: fix_weights_none ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0116      0.0239      -0.0784      0.0552            
+  2004  2005 |     -0.0675      0.0317      -0.1561      0.0211            
+  2004  2006 |     -0.1365      0.0368      -0.2393     -0.0338            *
+  2004  2007 |     -0.0976      0.0348      -0.1949     -0.0004            *
+  2006  2004 |      0.0080      0.0233      -0.0571      0.0731            
+  2006  2005 |     -0.0023      0.0193      -0.0562      0.0515            
+  2006  2006 |     -0.0055      0.0176      -0.0547      0.0438            
+  2006  2007 |     -0.0408      0.0201      -0.0970      0.0155            
+  2007  2004 |      0.0308      0.0150      -0.0111      0.0726            
+  2007  2005 |     -0.0016      0.0165      -0.0478      0.0446            
+  2007  2006 |     -0.0320      0.0176      -0.0811      0.0172            
+  2007  2007 |     -0.0266      0.0166      -0.0730      0.0197            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: fix_weights_base ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0116      0.0239      -0.0783      0.0552            
+  2004  2005 |     -0.0675      0.0317      -0.1560      0.0211            
+  2004  2006 |     -0.1365      0.0368      -0.2392     -0.0339            *
+  2004  2007 |     -0.0976      0.0348      -0.1948     -0.0005            *
+  2006  2004 |      0.0078      0.0233      -0.0572      0.0729            
+  2006  2005 |     -0.0024      0.0193      -0.0562      0.0515            
+  2006  2006 |     -0.0055      0.0176      -0.0547      0.0437            
+  2006  2007 |     -0.0408      0.0201      -0.0969      0.0154            
+  2007  2004 |      0.0307      0.0150      -0.0111      0.0725            
+  2007  2005 |     -0.0018      0.0165      -0.0478      0.0443            
+  2007  2006 |     -0.0319      0.0176      -0.0810      0.0172            
+  2007  2007 |     -0.0266      0.0166      -0.0729      0.0196            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: fix_weights_first ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0116      0.0239      -0.0784      0.0552            
+  2004  2005 |     -0.0675      0.0317      -0.1561      0.0211            
+  2004  2006 |     -0.1365      0.0368      -0.2393     -0.0338            *
+  2004  2007 |     -0.0976      0.0348      -0.1949     -0.0004            *
+  2006  2004 |      0.0080      0.0233      -0.0571      0.0731            
+  2006  2005 |     -0.0023      0.0192      -0.0561      0.0515            
+  2006  2006 |     -0.0056      0.0176      -0.0548      0.0436            
+  2006  2007 |     -0.0407      0.0201      -0.0969      0.0155            
+  2007  2004 |      0.0308      0.0150      -0.0111      0.0726            
+  2007  2005 |     -0.0015      0.0165      -0.0477      0.0447            
+  2007  2006 |     -0.0321      0.0175      -0.0811      0.0169            
+  2007  2007 |     -0.0268      0.0166      -0.0731      0.0195            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: fix_weights_varying ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0114      0.0237      -0.0779      0.0550            
+  2004  2005 |     -0.0678      0.0321      -0.1575      0.0219            
+  2004  2006 |     -0.1365      0.0372      -0.2405     -0.0326            *
+  2004  2007 |     -0.0982      0.0367      -0.2009      0.0045            
+  2006  2004 |      0.0074      0.0233      -0.0577      0.0725            
+  2006  2005 |     -0.0029      0.0193      -0.0569      0.0511            
+  2006  2006 |     -0.0059      0.0177      -0.0553      0.0435            
+  2006  2007 |     -0.0417      0.0203      -0.0985      0.0150            
+  2007  2004 |      0.0293      0.0149      -0.0124      0.0711            
+  2007  2005 |     -0.0029      0.0165      -0.0491      0.0432            
+  2007  2006 |     -0.0330      0.0176      -0.0822      0.0162            
+  2007  2007 |     -0.0275      0.0165      -0.0737      0.0186            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 4: factor_cov (factor_cov.csv, REG, nevertreated)
+. *  Direct Julia call needed for xformla=["C(cat)"]
+. * ═══════════════════════════════════════════════════════════════
+. 
+. import delimited "`dpath'/factor_cov.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(7 vars, 8,000 obs)
+
+. di "Dataset: factor_cov  N=`=_N'"
+Dataset: factor_cov  N=8000
+
+. 
+. di ""
+
+
+. di as txt "{hline 70}"
+----------------------------------------------------------------------
+
+. di as txt "=== SCENARIO: factor_cov ==="
+=== SCENARIO: factor_cov ===
+
+. di as txt "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+. cap noisily {
+.   _csdid_jl_start_julia
+.   csdid_jl_load
+. 
+.   * Transfer data to Julia DataFrame — use lowercase variable names
+.   * (Stata's import delimited may lowercase them)
+.   * cat is a string variable ('a','b','c') — encode to numeric so
+.   * PutVarsToDF (doubleonly) can transfer it. C(cat) in Julia will
+.   * then treat the integer levels as categorical (same dummy encoding).
+.   encode cat, gen(cat_n)
+.   drop cat
+.   rename cat_n cat
+.   local fcvars "id period g y x cluster cat"
+.   jl PutVarsToDF `fcvars', nomissing doubleonly nolabel
+. 
+.   * Direct Julia call with C(cat) categorical syntax
+.   * Use column names as they appear in the Stata dataset
+.   _jl: _csdid_r = CSDid.att_gt(yname="y", tname="period", idname="id", gname=
+> "g", data=df, est_method="reg", control_group="nevertreated", base_period="va
+> rying", xformla=["C(cat)"])
+. 
+.   _jl: st_numscalar("__ngt", length(_csdid_r.att))
+.   local ngt = scalar(__ngt)
+. 
+.   _jl: _csdid_att_v = reshape(_csdid_r.att, 1, :)
+.   _jl: _csdid_se_v  = reshape(_csdid_r.se,  1, :)
+.   _jl: _csdid_g_v   = reshape(Float64.(_csdid_r.group), 1, :)
+.   _jl: _csdid_t_v   = reshape(Float64.(_csdid_r.t),     1, :)
+. 
+.   jl GetMatFromMat __att, source(_csdid_att_v)
+.   jl GetMatFromMat __se,  source(_csdid_se_v)
+.   jl GetMatFromMat __grp, source(_csdid_g_v)
+.   jl GetMatFromMat __tt,  source(_csdid_t_v)
+. 
+.   forvalues i = 1/`ngt' {
+  2.     local g = __grp[1, `i']
+  3.     local t = __tt[1, `i']
+  4.     local a = __att[1, `i']
+  5.     local s = __se[1, `i']
+  6.     post `att_h' ("factor_cov") (`g') (`t') (`a') (`s')
+  7.   }
+.   di as txt "  Posted `ngt' ATT(g,t) rows"
+  Posted 9 ATT(g,t) rows
+. 
+.   cap matrix drop __att __se __grp __tt
+.   cap scalar drop __ngt
+. }
+
+. if _rc {
+.   di as err "  SCENARIO FAILED (rc=" _rc ")"
+. }
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 5: gap scenarios (mpdta_extra.csv, REG, nevertreated)
+. * ═══════════════════════════════════════════════════════════════
+. 
+. import delimited "`dpath'/mpdta_extra.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(8 vars, 2,500 obs)
+
+. cap rename firsttreat first_treat
+
+. di "Dataset: mpdta_extra  N=`=_N'"
+Dataset: mpdta_extra  N=2500
+
+. 
+. local gap_scns      rc universal anticipation1 weighted clustered
+
+. local gap_opt_rc            nopanel
+
+. local gap_opt_universal     base_period(universal)
+
+. local gap_opt_anticipation1 anticipation(1)
+
+. local gap_opt_weighted      weights(wt)
+
+. local gap_opt_clustered     cluster(clust)
+
+. 
+. foreach scn of local gap_scns {
+  2.   local extra "`gap_opt_`scn''"
+  3. 
+.   di ""
+  4.   di as txt "{hline 70}"
+  5.   di as txt "=== SCENARIO: `scn' ==="
+  6.   di as txt "{hline 70}"
+  7. 
+.   cap noisily {
+  8.     csdid_jl lemp, tname(year) gname(first_treat) idname(countyreal) ///
+>       est_method(reg) control_group(nevertreated) `extra'
+  9. 
+.     local ngt = e(ngt)
+ 10.     tempname att_m se_m grp_m tt_m
+ 11.     matrix `att_m' = e(att)
+ 12.     matrix `se_m'  = e(se)
+ 13.     matrix `grp_m' = e(group)
+ 14.     matrix `tt_m'  = e(t)
+ 15. 
+.     forvalues i = 1/`ngt' {
+ 16.       local g = `grp_m'[1, `i']
+ 17.       local t = `tt_m'[1, `i']
+ 18.       local a = `att_m'[1, `i']
+ 19.       local s = `se_m'[1, `i']
+ 20.       post `att_h' ("`scn'") (`g') (`t') (`a') (`s')
+ 21.     }
+ 22.     di as txt "  Posted `ngt' ATT(g,t) rows"
+ 23.   }
+ 24.   if _rc {
+ 25.     di as err "  SCENARIO FAILED (rc=" _rc ")"
+ 26.   }
+ 27. }
+
+----------------------------------------------------------------------
+=== SCENARIO: rc ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =     2,500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0105      0.4758      -1.3313      1.3103            
+  2004  2005 |     -0.0704      0.4823      -1.4091      1.2683            
+  2004  2006 |     -0.1373      0.4856      -1.4852      1.2107            
+  2004  2007 |     -0.1008      0.4790      -1.4303      1.2287            
+  2006  2004 |      0.0065      0.3041      -0.8376      0.8507            
+  2006  2005 |     -0.0028      0.3069      -0.8545      0.8490            
+  2006  2006 |     -0.0046      0.3113      -0.8686      0.8594            
+  2006  2007 |     -0.0412      0.3125      -0.9086      0.8261            
+  2007  2004 |      0.0305      0.2219      -0.5854      0.6464            
+  2007  2005 |     -0.0027      0.2233      -0.6226      0.6171            
+  2007  2006 |     -0.0311      0.2236      -0.6519      0.5897            
+  2007  2007 |     -0.0261      0.2232      -0.6457      0.5936            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: universal ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     15
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2003 |      0.0000           .            .           .            *
+  2004  2004 |     -0.0105      0.0233      -0.0754      0.0544            
+  2004  2005 |     -0.0704      0.0310      -0.1569      0.0160            
+  2004  2006 |     -0.1373      0.0364      -0.2389     -0.0356            *
+  2004  2007 |     -0.1008      0.0344      -0.1967     -0.0049            *
+  2006  2003 |     -0.0038      0.0313      -0.0912      0.0837            
+  2006  2004 |      0.0028      0.0196      -0.0518      0.0573            
+  2006  2005 |      0.0000           .            .           .            *
+  2006  2006 |     -0.0046      0.0178      -0.0541      0.0450            
+  2006  2007 |     -0.0412      0.0202      -0.0977      0.0152            
+  2007  2003 |      0.0033      0.0245      -0.0649      0.0715            
+  2007  2004 |      0.0338      0.0211      -0.0252      0.0928            
+  2007  2005 |      0.0311      0.0179      -0.0188      0.0810            
+  2007  2006 |      0.0000           .            .           .            *
+  2007  2007 |     -0.0261      0.0167      -0.0725      0.0204            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 15 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: anticipation1 ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =      8
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2006  2004 |      0.0065      0.0233      -0.0561      0.0692            
+  2006  2005 |     -0.0028      0.0196      -0.0553      0.0498            
+  2006  2006 |     -0.0073      0.0229      -0.0690      0.0543            
+  2006  2007 |     -0.0440      0.0266      -0.1154      0.0274            
+  2007  2004 |      0.0305      0.0150      -0.0099      0.0709            
+  2007  2005 |     -0.0027      0.0164      -0.0468      0.0413            
+  2007  2006 |     -0.0311      0.0179      -0.0791      0.0169            
+  2007  2007 |     -0.0571      0.0202      -0.1114     -0.0029            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 8 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: weighted ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0112      0.0237      -0.0776      0.0552            
+  2004  2005 |     -0.0673      0.0313      -0.1549      0.0203            
+  2004  2006 |     -0.1332      0.0359      -0.2338     -0.0327            *
+  2004  2007 |     -0.0965      0.0366      -0.1990      0.0060            
+  2006  2004 |      0.0029      0.0251      -0.0675      0.0732            
+  2006  2005 |     -0.0042      0.0208      -0.0624      0.0540            
+  2006  2006 |     -0.0044      0.0181      -0.0552      0.0463            
+  2006  2007 |     -0.0418      0.0219      -0.1030      0.0195            
+  2007  2004 |      0.0338      0.0154      -0.0094      0.0769            
+  2007  2005 |     -0.0019      0.0157      -0.0459      0.0421            
+  2007  2006 |     -0.0313      0.0171      -0.0793      0.0166            
+  2007  2007 |     -0.0225      0.0151      -0.0649      0.0199            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: clustered ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     2,500
+Outcome variable:  lemp                          Number of units =       500
+                                                 Num. (g,t) cells =     12
+Estimator:         reg                           Control group  = nevertreated
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+  2004  2004 |     -0.0105      0.0121      -0.0449      0.0239            
+  2004  2005 |     -0.0704      0.0145      -0.1115     -0.0293            *
+  2004  2006 |     -0.1373      0.0232      -0.2030     -0.0715            *
+  2004  2007 |     -0.1008      0.0208      -0.1597     -0.0419            *
+  2006  2004 |      0.0065      0.0358      -0.0950      0.1081            
+  2006  2005 |     -0.0028      0.0208      -0.0618      0.0563            
+  2006  2006 |     -0.0046      0.0203      -0.0620      0.0529            
+  2006  2007 |     -0.0412      0.0272      -0.1182      0.0358            
+  2007  2004 |      0.0305      0.0165      -0.0164      0.0774            
+  2007  2005 |     -0.0027      0.0160      -0.0480      0.0425            
+  2007  2006 |     -0.0311      0.0266      -0.1065      0.0443            
+  2007  2007 |     -0.0261      0.0143      -0.0667      0.0146            
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 12 ATT(g,t) rows
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  BLOCK 6: sim parity (24 scenarios)
+. *  6 datasets × 2 control groups × 2 estimators
+. * ═══════════════════════════════════════════════════════════════
+. 
+. local sim_datasets  tp2_const tp4_const tp4_dyn tp5_dyn tp8_dyn tp10_const
+
+. local sim_controls  nevertreated notyettreated
+
+. local sim_ests      dr reg
+
+. 
+. foreach ds of local sim_datasets {
+  2.   * Use local + forward slash to avoid Stata \` escaping issue
+.   import delimited "`dpath'/`ds'.csv", clear
+  3.   di ""
+  4.   di "Dataset: `ds'  N=`=_N'"
+  5. 
+.   foreach cg of local sim_controls {
+  6.     foreach em of local sim_ests {
+  7.       local scname "sim_`ds'_`cg'_`em'"
+  8. 
+.       di ""
+  9.       di as txt "{hline 70}"
+ 10.       di as txt "=== SCENARIO: `scname' ==="
+ 11.       di as txt "{hline 70}"
+ 12. 
+.       cap noisily {
+ 13.         csdid_jl y x, tname(period) gname(g) idname(id) ///
+>           est_method(`em') control_group(`cg')
+ 14. 
+.         local ngt = e(ngt)
+ 15.         tempname att_m se_m grp_m tt_m
+ 16.         matrix `att_m' = e(att)
+ 17.         matrix `se_m'  = e(se)
+ 18.         matrix `grp_m' = e(group)
+ 19.         matrix `tt_m'  = e(t)
+ 20. 
+.         forvalues i = 1/`ngt' {
+ 21.           local g = `grp_m'[1, `i']
+ 22.           local t = `tt_m'[1, `i']
+ 23.           local a = `att_m'[1, `i']
+ 24.           local s = `se_m'[1, `i']
+ 25.           post `att_h' ("`scname'") (`g') (`t') (`a') (`s')
+ 26.         }
+ 27.         di as txt "  Posted `ngt' ATT(g,t) rows"
+ 28.       }
+ 29.       if _rc {
+ 30.         di as err "  SCENARIO FAILED (rc=" _rc ")"
+ 31.       }
+ 32.     }
+ 33.   }
+ 34. }
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 10,000 obs)
+
+Dataset: tp2_const  N=10000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp2_const_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     5,000
+                                                 Num. (g,t) cells =      1
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0359      0.0397       0.9581      1.1136            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 1 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp2_const_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     5,000
+                                                 Num. (g,t) cells =      1
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0359      0.0397       0.9581      1.1137            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 1 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp2_const_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     5,000
+                                                 Num. (g,t) cells =      1
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0359      0.0397       0.9581      1.1136            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 1 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp2_const_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     5,000
+                                                 Num. (g,t) cells =      1
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0359      0.0397       0.9581      1.1137            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 1 ATT(g,t) rows
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 4,000 obs)
+
+Dataset: tp4_const  N=4000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_const_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     4,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =      9
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.8910      0.1268       0.5535      1.2285            *
+     2     3 |      1.0578      0.1286       0.7155      1.4002            *
+     2     4 |      1.1094      0.1231       0.7816      1.4372            *
+     3     2 |      0.0178      0.1254      -0.3160      0.3516            
+     3     3 |      1.0529      0.1325       0.7000      1.4058            *
+     3     4 |      0.9885      0.1278       0.6481      1.3289            *
+     4     2 |     -0.0679      0.1280      -0.4087      0.2728            
+     4     3 |      0.0931      0.1373      -0.2725      0.4587            
+     4     4 |      0.9468      0.1325       0.5940      1.2995            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_const_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     4,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =      9
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.8911      0.1268       0.5530      1.2292            *
+     2     3 |      1.0587      0.1286       0.7157      1.4016            *
+     2     4 |      1.1093      0.1232       0.7806      1.4379            *
+     3     2 |      0.0179      0.1254      -0.3165      0.3522            
+     3     3 |      1.0531      0.1326       0.6994      1.4067            *
+     3     4 |      0.9884      0.1278       0.6475      1.3293            *
+     4     2 |     -0.0678      0.1280      -0.4091      0.2735            
+     4     3 |      0.0937      0.1375      -0.2730      0.4604            
+     4     4 |      0.9458      0.1325       0.5924      1.2992            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_const_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     4,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =      9
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.9170      0.1052       0.6356      1.1985            *
+     2     3 |      1.0463      0.1130       0.7439      1.3487            *
+     2     4 |      1.1094      0.1231       0.7800      1.4388            *
+     3     2 |      0.0515      0.1095      -0.2414      0.3443            
+     3     3 |      1.0065      0.1131       0.7039      1.3091            *
+     3     4 |      0.9885      0.1278       0.6465      1.3305            *
+     4     2 |     -0.0664      0.1116      -0.3651      0.2323            
+     4     3 |      0.0931      0.1373      -0.2743      0.4605            
+     4     4 |      0.9468      0.1325       0.5923      1.3012            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_const_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     4,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =      9
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.9170      0.1052       0.6363      1.1978            *
+     2     3 |      1.0463      0.1130       0.7447      1.3479            *
+     2     4 |      1.1093      0.1232       0.7804      1.4381            *
+     3     2 |      0.0515      0.1095      -0.2406      0.3435            
+     3     3 |      1.0065      0.1131       0.7046      1.3083            *
+     3     4 |      0.9884      0.1278       0.6473      1.3295            *
+     4     2 |     -0.0661      0.1116      -0.3640      0.2317            
+     4     3 |      0.0937      0.1375      -0.2731      0.4606            
+     4     4 |      0.9458      0.1325       0.5923      1.2994            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 8,000 obs)
+
+Dataset: tp4_dyn  N=8000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_dyn_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     8,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =      9
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0083      0.0899       0.7614      1.2553            *
+     2     3 |      2.0139      0.0874       1.7737      2.2540            *
+     2     4 |      2.9981      0.0895       2.7522      3.2441            *
+     3     2 |     -0.0814      0.0890      -0.3261      0.1633            
+     3     3 |      1.0465      0.0861       0.8099      1.2830            *
+     3     4 |      2.1212      0.0893       1.8758      2.3665            *
+     4     2 |     -0.0300      0.0902      -0.2779      0.2179            
+     4     3 |     -0.0882      0.0899      -0.3353      0.1588            
+     4     4 |      1.1861      0.0868       0.9475      1.4247            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_dyn_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     8,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =      9
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0081      0.0899       0.7614      1.2548            *
+     2     3 |      2.0135      0.0874       1.7736      2.2534            *
+     2     4 |      2.9975      0.0895       2.7520      3.2431            *
+     3     2 |     -0.0816      0.0891      -0.3260      0.1629            
+     3     3 |      1.0463      0.0861       0.8100      1.2827            *
+     3     4 |      2.1209      0.0893       1.8758      2.3660            *
+     4     2 |     -0.0305      0.0902      -0.2782      0.2171            
+     4     3 |     -0.0888      0.0899      -0.3357      0.1581            
+     4     4 |      1.1854      0.0868       0.9471      1.4237            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_dyn_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     8,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =      9
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0461      0.0738       0.8434      1.2488            *
+     2     3 |      2.0730      0.0765       1.8628      2.2832            *
+     2     4 |      2.9981      0.0895       2.7522      3.2441            *
+     3     2 |     -0.0662      0.0773      -0.2786      0.1462            
+     3     3 |      1.0906      0.0741       0.8870      1.2941            *
+     3     4 |      2.1212      0.0893       1.8758      2.3665            *
+     4     2 |      0.0152      0.0781      -0.1995      0.2299            
+     4     3 |     -0.0882      0.0899      -0.3353      0.1588            
+     4     4 |      1.1861      0.0868       0.9475      1.4247            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp4_dyn_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =     8,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =      9
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0461      0.0738       0.8437      1.2486            *
+     2     3 |      2.0730      0.0765       1.8630      2.2830            *
+     2     4 |      2.9975      0.0895       2.7520      3.2431            *
+     3     2 |     -0.0662      0.0773      -0.2784      0.1460            
+     3     3 |      1.0906      0.0741       0.8872      1.2939            *
+     3     4 |      2.1209      0.0893       1.8758      2.3660            *
+     4     2 |      0.0156      0.0781      -0.1989      0.2301            
+     4     3 |     -0.0888      0.0899      -0.3357      0.1581            
+     4     4 |      1.1854      0.0868       0.9471      1.4237            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 9 ATT(g,t) rows
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 10,000 obs)
+
+Dataset: tp5_dyn  N=10000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp5_dyn_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     16
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |     -0.9715      0.1021      -1.2641     -0.6789            *
+     2     3 |     -0.0389      0.1052      -0.3405      0.2628            
+     2     4 |      0.9226      0.0993       0.6381      1.2072            *
+     2     5 |      2.0301      0.1032       1.7344      2.3259            *
+     3     2 |      0.1717      0.0963      -0.1045      0.4479            
+     3     3 |     -1.1063      0.0963      -1.3825     -0.8301            *
+     3     4 |     -0.1698      0.0967      -0.4470      0.1074            
+     3     5 |      0.7695      0.0930       0.5027      1.0362            *
+     4     2 |      0.0380      0.0985      -0.2443      0.3203            
+     4     3 |     -0.0731      0.0989      -0.3568      0.2105            
+     4     4 |     -0.9546      0.0979      -1.2353     -0.6739            *
+     4     5 |      0.1320      0.1018      -0.1600      0.4240            
+     5     2 |     -0.0165      0.1009      -0.3058      0.2729            
+     5     3 |      0.0648      0.0978      -0.2157      0.3453            
+     5     4 |      0.0169      0.0981      -0.2644      0.2981            
+     5     5 |     -1.0234      0.1026      -1.3176     -0.7293            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 16 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp5_dyn_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     16
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |     -0.9706      0.1020      -1.2628     -0.6784            *
+     2     3 |     -0.0381      0.1052      -0.3394      0.2633            
+     2     4 |      0.9241      0.0993       0.6397      1.2086            *
+     2     5 |      2.0312      0.1031       1.7358      2.3265            *
+     3     2 |      0.1722      0.0963      -0.1037      0.4482            
+     3     3 |     -1.1063      0.0964      -1.3826     -0.8301            *
+     3     4 |     -0.1695      0.0967      -0.4466      0.1077            
+     3     5 |      0.7696      0.0931       0.5028      1.0364            *
+     4     2 |      0.0385      0.0984      -0.2435      0.3206            
+     4     3 |     -0.0732      0.0990      -0.3569      0.2105            
+     4     4 |     -0.9541      0.0979      -1.2348     -0.6734            *
+     4     5 |      0.1321      0.1019      -0.1599      0.4241            
+     5     2 |     -0.0163      0.1009      -0.3055      0.2729            
+     5     3 |      0.0648      0.0979      -0.2157      0.3452            
+     5     4 |      0.0170      0.0981      -0.2641      0.2982            
+     5     5 |     -1.0235      0.1026      -1.3175     -0.7296            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 16 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp5_dyn_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     16
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |     -1.0136      0.0831      -1.2511     -0.7761            *
+     2     3 |     -0.0445      0.0863      -0.2912      0.2021            
+     2     4 |      0.8949      0.0863       0.6481      1.1416            *
+     2     5 |      2.0301      0.1032       1.7352      2.3251            *
+     3     2 |      0.1676      0.0794      -0.0595      0.3946            
+     3     3 |     -1.1072      0.0807      -1.3381     -0.8763            *
+     3     4 |     -0.2116      0.0856      -0.4563      0.0330            
+     3     5 |      0.7695      0.0930       0.5034      1.0355            *
+     4     2 |     -0.0097      0.0817      -0.2434      0.2239            
+     4     3 |     -0.1105      0.0879      -0.3619      0.1409            
+     4     4 |     -0.9590      0.0848      -1.2015     -0.7166            *
+     4     5 |      0.1320      0.1018      -0.1592      0.4232            
+     5     2 |     -0.0866      0.0845      -0.3284      0.1552            
+     5     3 |      0.1004      0.0870      -0.1484      0.3492            
+     5     4 |      0.0169      0.0981      -0.2636      0.2974            
+     5     5 |     -1.0234      0.1026      -1.3168     -0.7300            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 16 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp5_dyn_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     16
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |     -1.0138      0.0831      -1.2511     -0.7764            *
+     2     3 |     -0.0442      0.0862      -0.2907      0.2022            
+     2     4 |      0.8955      0.0863       0.6489      1.1422            *
+     2     5 |      2.0312      0.1031       1.7366      2.3257            *
+     3     2 |      0.1675      0.0794      -0.0594      0.3943            
+     3     3 |     -1.1070      0.0807      -1.3377     -0.8763            *
+     3     4 |     -0.2112      0.0856      -0.4557      0.0334            
+     3     5 |      0.7696      0.0931       0.5036      1.0356            *
+     4     2 |     -0.0098      0.0817      -0.2433      0.2237            
+     4     3 |     -0.1101      0.0879      -0.3613      0.1412            
+     4     4 |     -0.9590      0.0848      -1.2013     -0.7166            *
+     4     5 |      0.1321      0.1019      -0.1590      0.4233            
+     5     2 |     -0.0866      0.0845      -0.3282      0.1550            
+     5     3 |      0.1004      0.0870      -0.1483      0.3491            
+     5     4 |      0.0170      0.0981      -0.2633      0.2974            
+     5     5 |     -1.0235      0.1026      -1.3166     -0.7304            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 16 ATT(g,t) rows
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 16,000 obs)
+
+Dataset: tp8_dyn  N=16000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp8_dyn_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    16,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     49
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0953      0.1218       0.6983      1.4924            *
+     2     3 |      1.9431      0.1245       1.5371      2.3491            *
+     2     4 |      3.0218      0.1302       2.5972      3.4464            *
+     2     5 |      4.1129      0.1296       3.6902      4.5355            *
+     2     6 |      5.0547      0.1297       4.6319      5.4776            *
+     2     7 |      6.1182      0.1281       5.7003      6.5361            *
+     2     8 |      7.0214      0.1193       6.6325      7.4104            *
+     3     2 |     -0.0826      0.1309      -0.5095      0.3443            
+     3     3 |      0.9519      0.1250       0.5442      1.3596            *
+     3     4 |      2.0753      0.1345       1.6366      2.5140            *
+     3     5 |      3.1047      0.1278       2.6878      3.5216            *
+     3     6 |      4.0910      0.1287       3.6714      4.5106            *
+     3     7 |      4.9816      0.1299       4.5578      5.4053            *
+     3     8 |      6.0672      0.1285       5.6483      6.4861            *
+     4     2 |      0.0595      0.1261      -0.3518      0.4708            
+     4     3 |     -0.1128      0.1265      -0.5253      0.2996            
+     4     4 |      1.1239      0.1290       0.7030      1.5447            *
+     4     5 |      2.1264      0.1246       1.7201      2.5327            *
+     4     6 |      3.1145      0.1311       2.6869      3.5421            *
+     4     7 |      4.0689      0.1268       3.6553      4.4825            *
+     4     8 |      5.0209      0.1203       4.6285      5.4132            *
+     5     2 |     -0.1640      0.1215      -0.5602      0.2321            
+     5     3 |      0.0947      0.1197      -0.2958      0.4852            
+     5     4 |     -0.0041      0.1294      -0.4262      0.4180            
+     5     5 |      1.0456      0.1269       0.6318      1.4594            *
+     5     6 |      1.9489      0.1301       1.5247      2.3731            *
+     5     7 |      2.9102      0.1322       2.4792      3.3412            *
+     5     8 |      3.9614      0.1296       3.5387      4.3840            *
+     6     2 |     -0.1319      0.1266      -0.5447      0.2810            
+     6     3 |     -0.0731      0.1278      -0.4898      0.3436            
+     6     4 |      0.1183      0.1261      -0.2930      0.5297            
+     6     5 |      0.0703      0.1223      -0.3287      0.4692            
+     6     6 |      0.8530      0.1308       0.4265      1.2795            *
+     6     7 |      1.8860      0.1357       1.4435      2.3285            *
+     6     8 |      2.7823      0.1246       2.3760      3.1886            *
+     7     2 |     -0.2477      0.1263      -0.6596      0.1642            
+     7     3 |      0.0081      0.1250      -0.3995      0.4157            
+     7     4 |      0.1560      0.1276      -0.2601      0.5720            
+     7     5 |      0.0512      0.1253      -0.3576      0.4600            
+     7     6 |     -0.0729      0.1313      -0.5011      0.3554            
+     7     7 |      0.9293      0.1235       0.5266      1.3320            *
+     7     8 |      1.7981      0.1223       1.3992      2.1970            *
+     8     2 |      0.0541      0.1199      -0.3370      0.4452            
+     8     3 |     -0.0350      0.1213      -0.4306      0.3606            
+     8     4 |      0.1074      0.1289      -0.3130      0.5277            
+     8     5 |      0.0492      0.1271      -0.3653      0.4638            
+     8     6 |     -0.0681      0.1298      -0.4913      0.3550            
+     8     7 |     -0.0306      0.1244      -0.4364      0.3753            
+     8     8 |      0.9492      0.1200       0.5577      1.3407            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 49 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp8_dyn_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    16,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     49
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.0953      0.1218       0.6974      1.4932            *
+     2     3 |      1.9431      0.1245       1.5363      2.3500            *
+     2     4 |      3.0216      0.1302       2.5960      3.4472            *
+     2     5 |      4.1128      0.1296       3.6892      4.5364            *
+     2     6 |      5.0548      0.1297       4.6311      5.4786            *
+     2     7 |      6.1183      0.1281       5.6996      6.5371            *
+     2     8 |      7.0215      0.1193       6.6317      7.4113            *
+     3     2 |     -0.0826      0.1309      -0.5105      0.3452            
+     3     3 |      0.9519      0.1250       0.5433      1.3605            *
+     3     4 |      2.0753      0.1345       1.6357      2.5149            *
+     3     5 |      3.1047      0.1278       2.6869      3.5225            *
+     3     6 |      4.0910      0.1287       3.6705      4.5115            *
+     3     7 |      4.9816      0.1299       4.5569      5.4062            *
+     3     8 |      6.0672      0.1285       5.6474      6.4870            *
+     4     2 |      0.0595      0.1261      -0.3527      0.4717            
+     4     3 |     -0.1128      0.1265      -0.5261      0.3005            
+     4     4 |      1.1239      0.1290       0.7021      1.5456            *
+     4     5 |      2.1264      0.1246       1.7192      2.5336            *
+     4     6 |      3.1145      0.1311       2.6860      3.5430            *
+     4     7 |      4.0689      0.1268       3.6544      4.4834            *
+     4     8 |      5.0209      0.1203       4.6277      5.4140            *
+     5     2 |     -0.1641      0.1215      -0.5610      0.2329            
+     5     3 |      0.0948      0.1197      -0.2966      0.4861            
+     5     4 |     -0.0042      0.1295      -0.4273      0.4189            
+     5     5 |      1.0456      0.1269       0.6309      1.4603            *
+     5     6 |      1.9490      0.1301       1.5238      2.3742            *
+     5     7 |      2.9104      0.1322       2.4784      3.3424            *
+     5     8 |      3.9615      0.1296       3.5379      4.3851            *
+     6     2 |     -0.1319      0.1266      -0.5456      0.2819            
+     6     3 |     -0.0731      0.1278      -0.4907      0.3445            
+     6     4 |      0.1183      0.1261      -0.2939      0.5305            
+     6     5 |      0.0703      0.1223      -0.3295      0.4701            
+     6     6 |      0.8530      0.1308       0.4256      1.2805            *
+     6     7 |      1.8860      0.1357       1.4426      2.3295            *
+     6     8 |      2.7823      0.1246       2.3751      3.1894            *
+     7     2 |     -0.2478      0.1263      -0.6606      0.1650            
+     7     3 |      0.0083      0.1250      -0.4002      0.4167            
+     7     4 |      0.1556      0.1276      -0.2613      0.5726            
+     7     5 |      0.0514      0.1253      -0.3582      0.4610            
+     7     6 |     -0.0727      0.1314      -0.5020      0.3567            
+     7     7 |      0.9294      0.1235       0.5259      1.3329            *
+     7     8 |      1.7981      0.1223       1.3984      2.1978            *
+     8     2 |      0.0540      0.1199      -0.3379      0.4459            
+     8     3 |     -0.0349      0.1213      -0.4314      0.3615            
+     8     4 |      0.1071      0.1289      -0.3143      0.5284            
+     8     5 |      0.0494      0.1271      -0.3661      0.4650            
+     8     6 |     -0.0679      0.1297      -0.4920      0.3561            
+     8     7 |     -0.0305      0.1244      -0.4372      0.3762            
+     8     8 |      0.9491      0.1200       0.5568      1.3414            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 49 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp8_dyn_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    16,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     49
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.1643      0.0929       0.8592      1.4694            *
+     2     3 |      2.0350      0.0930       1.7297      2.3404            *
+     2     4 |      3.0446      0.0994       2.7183      3.3709            *
+     2     5 |      4.0795      0.1016       3.7459      4.4131            *
+     2     6 |      5.0561      0.1060       4.7081      5.4041            *
+     2     7 |      6.0800      0.1117       5.7133      6.4466            *
+     2     8 |      7.0214      0.1193       6.6298      7.4131            *
+     3     2 |     -0.0119      0.1051      -0.3569      0.3332            
+     3     3 |      0.9726      0.0977       0.6518      1.2934            *
+     3     4 |      2.0014      0.1015       1.6683      2.3346            *
+     3     5 |      2.9918      0.1017       2.6578      3.3258            *
+     3     6 |      4.0258      0.1052       3.6803      4.3713            *
+     3     7 |      4.9684      0.1118       4.6011      5.3357            *
+     3     8 |      6.0672      0.1285       5.6454      6.4890            *
+     4     2 |      0.1554      0.0989      -0.1695      0.4803            
+     4     3 |     -0.1122      0.1004      -0.4420      0.2176            
+     4     4 |      1.0486      0.0969       0.7304      1.3668            *
+     4     5 |      1.9884      0.0987       1.6643      2.3124            *
+     4     6 |      3.0391      0.1079       2.6849      3.3932            *
+     4     7 |      4.0373      0.1079       3.6829      4.3918            *
+     4     8 |      5.0209      0.1203       4.6258      5.4159            *
+     5     2 |     -0.1032      0.0935      -0.4100      0.2037            
+     5     3 |      0.1354      0.0923      -0.1676      0.4384            
+     5     4 |     -0.1003      0.0996      -0.4274      0.2267            
+     5     5 |      1.0037      0.0994       0.6773      1.3302            *
+     5     6 |      1.9610      0.1040       1.6196      2.3025            *
+     5     7 |      2.9324      0.1122       2.5640      3.3007            *
+     5     8 |      3.9614      0.1296       3.5358      4.3869            *
+     6     2 |     -0.0680      0.0996      -0.3952      0.2591            
+     6     3 |     -0.0644      0.1023      -0.4004      0.2716            
+     6     4 |      0.0538      0.0953      -0.2592      0.3668            
+     6     5 |      0.0372      0.0971      -0.2815      0.3559            
+     6     6 |      0.8989      0.1036       0.5588      1.2390            *
+     6     7 |      1.9330      0.1153       1.5542      2.3117            *
+     6     8 |      2.7823      0.1246       2.3732      3.1914            *
+     7     2 |     -0.1987      0.0992      -0.5245      0.1270            
+     7     3 |      0.0288      0.0990      -0.2963      0.3539            
+     7     4 |      0.1019      0.0971      -0.2170      0.4208            
+     7     5 |      0.0123      0.1007      -0.3184      0.3430            
+     7     6 |     -0.0423      0.1108      -0.4060      0.3215            
+     7     7 |      0.9430      0.1053       0.5972      1.2888            *
+     7     8 |      1.7981      0.1223       1.3965      2.1998            *
+     8     2 |      0.1429      0.0919      -0.1589      0.4448            
+     8     3 |     -0.0107      0.0945      -0.3209      0.2995            
+     8     4 |      0.0374      0.0987      -0.2866      0.3614            
+     8     5 |      0.0069      0.1018      -0.3274      0.3412            
+     8     6 |     -0.0256      0.1095      -0.3851      0.3339            
+     8     7 |     -0.0306      0.1244      -0.4392      0.3781            
+     8     8 |      0.9492      0.1200       0.5550      1.3434            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 49 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp8_dyn_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    16,000
+Outcome variable:  y                             Number of units =     2,000
+                                                 Num. (g,t) cells =     49
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      1.1643      0.0929       0.8592      1.4693            *
+     2     3 |      2.0350      0.0930       1.7297      2.3403            *
+     2     4 |      3.0446      0.0994       2.7183      3.3708            *
+     2     5 |      4.0794      0.1016       3.7457      4.4130            *
+     2     6 |      5.0561      0.1060       4.7081      5.4041            *
+     2     7 |      6.0800      0.1116       5.7134      6.4466            *
+     2     8 |      7.0215      0.1193       6.6298      7.4132            *
+     3     2 |     -0.0119      0.1051      -0.3568      0.3331            
+     3     3 |      0.9726      0.0977       0.6519      1.2934            *
+     3     4 |      2.0014      0.1015       1.6683      2.3346            *
+     3     5 |      2.9918      0.1017       2.6578      3.3258            *
+     3     6 |      4.0258      0.1052       3.6803      4.3713            *
+     3     7 |      4.9684      0.1119       4.6011      5.3357            *
+     3     8 |      6.0672      0.1285       5.6454      6.4890            *
+     4     2 |      0.1554      0.0989      -0.1695      0.4803            
+     4     3 |     -0.1122      0.1004      -0.4420      0.2176            
+     4     4 |      1.0486      0.0969       0.7304      1.3668            *
+     4     5 |      1.9883      0.0987       1.6643      2.3124            *
+     4     6 |      3.0391      0.1079       2.6849      3.3932            *
+     4     7 |      4.0375      0.1079       3.6831      4.3919            *
+     4     8 |      5.0209      0.1203       4.6259      5.4159            *
+     5     2 |     -0.1032      0.0934      -0.4100      0.2037            
+     5     3 |      0.1354      0.0923      -0.1675      0.4384            
+     5     4 |     -0.1003      0.0996      -0.4274      0.2267            
+     5     5 |      1.0037      0.0994       0.6773      1.3301            *
+     5     6 |      1.9611      0.1040       1.6196      2.3025            *
+     5     7 |      2.9328      0.1122       2.5644      3.3012            *
+     5     8 |      3.9615      0.1296       3.5359      4.3871            *
+     6     2 |     -0.0680      0.0996      -0.3952      0.2591            
+     6     3 |     -0.0644      0.1023      -0.4004      0.2716            
+     6     4 |      0.0538      0.0953      -0.2592      0.3668            
+     6     5 |      0.0372      0.0970      -0.2815      0.3558            
+     6     6 |      0.8989      0.1036       0.5588      1.2390            *
+     6     7 |      1.9332      0.1153       1.5545      2.3119            *
+     6     8 |      2.7823      0.1246       2.3732      3.1914            *
+     7     2 |     -0.1988      0.0992      -0.5245      0.1270            
+     7     3 |      0.0288      0.0990      -0.2963      0.3539            
+     7     4 |      0.1019      0.0971      -0.2170      0.4208            
+     7     5 |      0.0121      0.1007      -0.3186      0.3428            
+     7     6 |     -0.0420      0.1108      -0.4058      0.3218            
+     7     7 |      0.9437      0.1052       0.5982      1.2892            *
+     7     8 |      1.7981      0.1223       1.3965      2.1997            *
+     8     2 |      0.1428      0.0919      -0.1590      0.4447            
+     8     3 |     -0.0107      0.0945      -0.3209      0.2996            
+     8     4 |      0.0373      0.0987      -0.2866      0.3613            
+     8     5 |      0.0068      0.1018      -0.3275      0.3411            
+     8     6 |     -0.0252      0.1095      -0.3847      0.3344            
+     8     7 |     -0.0305      0.1244      -0.4391      0.3781            
+     8     8 |      0.9491      0.1200       0.5550      1.3432            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 49 ATT(g,t) rows
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 10,000 obs)
+
+Dataset: tp10_const  N=10000
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp10_const_nevertreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =     81
+Estimator:         dr                            Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.9380      0.2031       0.2480      1.6279            *
+     2     3 |      0.9294      0.1939       0.2708      1.5880            *
+     2     4 |      1.1123      0.1986       0.4376      1.7870            *
+     2     5 |      0.8729      0.2054       0.1752      1.5705            *
+     2     6 |      1.2432      0.2069       0.5404      1.9461            *
+     2     7 |      1.1323      0.1947       0.4709      1.7937            *
+     2     8 |      1.0048      0.2143       0.2770      1.7327            *
+     2     9 |      1.1700      0.2212       0.4185      1.9214            *
+     2    10 |      1.0799      0.2238       0.3198      1.8399            *
+     3     2 |      0.1762      0.2019      -0.5097      0.8620            
+     3     3 |      0.7618      0.1955       0.0978      1.4258            *
+     3     4 |      0.7211      0.1901       0.0755      1.3668            *
+     3     5 |      0.7990      0.1887       0.1581      1.4398            *
+     3     6 |      0.8988      0.1927       0.2444      1.5533            *
+     3     7 |      0.9973      0.1800       0.3859      1.6086            *
+     3     8 |      0.8526      0.1969       0.1837      1.5214            *
+     3     9 |      0.6786      0.2042      -0.0148      1.3721            
+     3    10 |      0.7389      0.1891       0.0967      1.3810            *
+     4     2 |      0.2560      0.1845      -0.3707      0.8827            
+     4     3 |      0.2044      0.1924      -0.4490      0.8578            
+     4     4 |      0.6736      0.1956       0.0092      1.3380            *
+     4     5 |      0.6040      0.2086      -0.1047      1.3127            
+     4     6 |      0.8021      0.2007       0.1205      1.4837            *
+     4     7 |      0.8181      0.1857       0.1872      1.4489            *
+     4     8 |      0.8089      0.1847       0.1813      1.4364            *
+     4     9 |      0.7110      0.1886       0.0703      1.3517            *
+     4    10 |      0.4849      0.1986      -0.1895      1.1594            
+     5     2 |      0.1341      0.1962      -0.5324      0.8007            
+     5     3 |     -0.1808      0.1886      -0.8215      0.4598            
+     5     4 |      0.0963      0.1864      -0.5369      0.7296            
+     5     5 |      0.7919      0.2162       0.0575      1.5264            *
+     5     6 |      0.7968      0.2167       0.0609      1.5327            *
+     5     7 |      0.8787      0.1947       0.2174      1.5400            *
+     5     8 |      0.9835      0.2272       0.2119      1.7551            *
+     5     9 |      1.0449      0.2126       0.3228      1.7670            *
+     5    10 |      0.9554      0.2015       0.2709      1.6400            *
+     6     2 |      0.1118      0.1962      -0.5546      0.7782            
+     6     3 |     -0.1811      0.2026      -0.8693      0.5071            
+     6     4 |      0.1530      0.2030      -0.5365      0.8424            
+     6     5 |     -0.3528      0.1921      -1.0053      0.2997            
+     6     6 |      1.2237      0.1926       0.5697      1.8777            *
+     6     7 |      1.3519      0.1928       0.6972      2.0066            *
+     6     8 |      1.3820      0.2037       0.6903      2.0738            *
+     6     9 |      1.3557      0.1973       0.6856      2.0258            *
+     6    10 |      1.2214      0.1970       0.5522      1.8907            *
+     7     2 |      0.1110      0.1868      -0.5235      0.7455            
+     7     3 |      0.0081      0.2016      -0.6768      0.6930            
+     7     4 |     -0.2078      0.2084      -0.9158      0.5002            
+     7     5 |      0.0140      0.2092      -0.6966      0.7245            
+     7     6 |      0.3385      0.1927      -0.3160      0.9930            
+     7     7 |      0.8665      0.1978       0.1947      1.5383            *
+     7     8 |      0.5513      0.2024      -0.1361      1.2386            
+     7     9 |      0.8599      0.2139       0.1335      1.5864            *
+     7    10 |      0.8297      0.2186       0.0872      1.5722            *
+     8     2 |      0.0229      0.1899      -0.6223      0.6681            
+     8     3 |     -0.0194      0.1827      -0.6401      0.6012            
+     8     4 |      0.1539      0.1953      -0.5095      0.8173            
+     8     5 |     -0.2633      0.2044      -0.9576      0.4309            
+     8     6 |      0.2746      0.1926      -0.3797      0.9288            
+     8     7 |     -0.2080      0.2088      -0.9173      0.5012            
+     8     8 |      0.9372      0.2152       0.2063      1.6681            *
+     8     9 |      0.9039      0.2073       0.1999      1.6080            *
+     8    10 |      0.8457      0.2097       0.1333      1.5581            *
+     9     2 |      0.1613      0.1930      -0.4941      0.8167            
+     9     3 |     -0.0624      0.1765      -0.6618      0.5371            
+     9     4 |      0.1050      0.1904      -0.5416      0.7515            
+     9     5 |     -0.2661      0.2081      -0.9728      0.4406            
+     9     6 |      0.3223      0.1944      -0.3381      0.9828            
+     9     7 |      0.0191      0.1886      -0.6215      0.6596            
+     9     8 |     -0.1800      0.2214      -0.9321      0.5722            
+     9     9 |      0.9758      0.2155       0.2438      1.7077            *
+     9    10 |      1.1100      0.2059       0.4108      1.8093            *
+    10     2 |      0.0629      0.1877      -0.5747      0.7005            
+    10     3 |      0.0390      0.1879      -0.5994      0.6774            
+    10     4 |      0.0347      0.1841      -0.5905      0.6600            
+    10     5 |     -0.1634      0.2003      -0.8436      0.5168            
+    10     6 |      0.2375      0.1979      -0.4347      0.9097            
+    10     7 |      0.0440      0.1902      -0.6020      0.6901            
+    10     8 |     -0.2443      0.2173      -0.9824      0.4938            
+    10     9 |      0.0586      0.1980      -0.6138      0.7310            
+    10    10 |      0.9001      0.2194       0.1549      1.6453            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 81 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp10_const_nevertreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =     81
+Estimator:         reg                           Control group  = nevertreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.9380      0.2031       0.2469      1.6290            *
+     2     3 |      0.9294      0.1939       0.2697      1.5891            *
+     2     4 |      1.1123      0.1986       0.4365      1.7881            *
+     2     5 |      0.8729      0.2054       0.1741      1.5717            *
+     2     6 |      1.2432      0.2069       0.5392      1.9472            *
+     2     7 |      1.1322      0.1948       0.4696      1.7948            *
+     2     8 |      1.0048      0.2143       0.2756      1.7340            *
+     2     9 |      1.1700      0.2212       0.4173      1.9226            *
+     2    10 |      1.0798      0.2238       0.3184      1.8413            *
+     3     2 |      0.1760      0.2019      -0.5109      0.8628            
+     3     3 |      0.7615      0.1957       0.0957      1.4273            *
+     3     4 |      0.7210      0.1902       0.0739      1.3681            *
+     3     5 |      0.7991      0.1889       0.1566      1.4416            *
+     3     6 |      0.8990      0.1927       0.2433      1.5548            *
+     3     7 |      0.9963      0.1801       0.3835      1.6091            *
+     3     8 |      0.8517      0.1971       0.1812      1.5222            *
+     3     9 |      0.6782      0.2045      -0.0175      1.3739            
+     3    10 |      0.7386      0.1891       0.0953      1.3819            *
+     4     2 |      0.2552      0.1846      -0.3728      0.8832            
+     4     3 |      0.2044      0.1927      -0.4510      0.8599            
+     4     4 |      0.6735      0.1958       0.0076      1.3395            *
+     4     5 |      0.6044      0.2089      -0.1061      1.3150            
+     4     6 |      0.8026      0.2007       0.1198      1.4854            *
+     4     7 |      0.8163      0.1862       0.1827      1.4499            *
+     4     8 |      0.8074      0.1851       0.1778      1.4369            *
+     4     9 |      0.7103      0.1887       0.0684      1.3521            *
+     4    10 |      0.4845      0.1988      -0.1918      1.1608            
+     5     2 |      0.1339      0.1961      -0.5332      0.8010            
+     5     3 |     -0.1842      0.1898      -0.8300      0.4617            
+     5     4 |      0.0984      0.1870      -0.5377      0.7345            
+     5     5 |      0.7934      0.2173       0.0541      1.5327            *
+     5     6 |      0.7990      0.2164       0.0628      1.5352            *
+     5     7 |      0.8734      0.1960       0.2067      1.5401            *
+     5     8 |      0.9792      0.2285       0.2019      1.7564            *
+     5     9 |      1.0430      0.2129       0.3189      1.7672            *
+     5    10 |      0.9546      0.2025       0.2659      1.6434            *
+     6     2 |      0.1118      0.1962      -0.5556      0.7793            
+     6     3 |     -0.1811      0.2026      -0.8704      0.5082            
+     6     4 |      0.1530      0.2030      -0.5376      0.8435            
+     6     5 |     -0.3528      0.1921      -1.0064      0.3008            
+     6     6 |      1.2237      0.1926       0.5686      1.8788            *
+     6     7 |      1.3518      0.1927       0.6961      2.0076            *
+     6     8 |      1.3820      0.2037       0.6891      2.0749            *
+     6     9 |      1.3557      0.1973       0.6845      2.0269            *
+     6    10 |      1.2214      0.1970       0.5511      1.8917            *
+     7     2 |      0.1110      0.1868      -0.5246      0.7465            
+     7     3 |      0.0081      0.2016      -0.6779      0.6941            
+     7     4 |     -0.2078      0.2084      -0.9169      0.5013            
+     7     5 |      0.0140      0.2092      -0.6977      0.7257            
+     7     6 |      0.3385      0.1927      -0.3171      0.9940            
+     7     7 |      0.8665      0.1978       0.1937      1.5394            *
+     7     8 |      0.5513      0.2024      -0.1372      1.2398            
+     7     9 |      0.8599      0.2139       0.1323      1.5876            *
+     7    10 |      0.8297      0.2186       0.0860      1.5734            *
+     8     2 |      0.0219      0.1902      -0.6251      0.6688            
+     8     3 |     -0.0193      0.1831      -0.6421      0.6036            
+     8     4 |      0.1538      0.1955      -0.5113      0.8188            
+     8     5 |     -0.2627      0.2046      -0.9589      0.4335            
+     8     6 |      0.2746      0.1926      -0.3805      0.9297            
+     8     7 |     -0.2108      0.2091      -0.9223      0.5007            
+     8     8 |      0.9375      0.2158       0.2034      1.6716            *
+     8     9 |      0.9052      0.2075       0.1993      1.6111            *
+     8    10 |      0.8473      0.2101       0.1325      1.5621            *
+     9     2 |      0.1611      0.1929      -0.4953      0.8175            
+     9     3 |     -0.0624      0.1766      -0.6630      0.5383            
+     9     4 |      0.1050      0.1904      -0.5428      0.7527            
+     9     5 |     -0.2660      0.2081      -0.9740      0.4421            
+     9     6 |      0.3224      0.1944      -0.3391      0.9838            
+     9     7 |      0.0185      0.1887      -0.6235      0.6606            
+     9     8 |     -0.1799      0.2216      -0.9337      0.5739            
+     9     9 |      0.9759      0.2155       0.2428      1.7091            *
+     9    10 |      1.1103      0.2060       0.4095      1.8110            *
+    10     2 |      0.0628      0.1878      -0.5759      0.7015            
+    10     3 |      0.0389      0.1880      -0.6006      0.6784            
+    10     4 |      0.0348      0.1841      -0.5916      0.6613            
+    10     5 |     -0.1633      0.2003      -0.8448      0.5183            
+    10     6 |      0.2375      0.1979      -0.4357      0.9107            
+    10     7 |      0.0434      0.1900      -0.6028      0.6897            
+    10     8 |     -0.2442      0.2174      -0.9839      0.4954            
+    10     9 |      0.0588      0.1980      -0.6149      0.7324            
+    10    10 |      0.9001      0.2194       0.1536      1.6466            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 81 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp10_const_notyettreated_dr ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =     81
+Estimator:         dr                            Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.8239      0.1554       0.2933      1.3545            *
+     2     3 |      0.8457      0.1549       0.3169      1.3746            *
+     2     4 |      1.0343      0.1492       0.5251      1.5435            *
+     2     5 |      0.9623      0.1486       0.4550      1.4696            *
+     2     6 |      1.0627      0.1617       0.5105      1.6149            *
+     2     7 |      1.0062      0.1535       0.4821      1.5304            *
+     2     8 |      0.9685      0.1663       0.4008      1.5361            *
+     2     9 |      1.1378      0.1928       0.4796      1.7960            *
+     2    10 |      1.0799      0.2238       0.3159      1.8439            *
+     3     2 |      0.0679      0.1529      -0.4541      0.5898            
+     3     3 |      0.7964      0.1499       0.2844      1.3083            *
+     3     4 |      0.7336      0.1517       0.2157      1.2514            *
+     3     5 |      0.9563      0.1547       0.4282      1.4845            *
+     3     6 |      0.7883      0.1521       0.2691      1.3074            *
+     3     7 |      0.9092      0.1529       0.3870      1.4313            *
+     3     8 |      0.8802      0.1616       0.3284      1.4320            *
+     3     9 |      0.6668      0.1823       0.0445      1.2892            *
+     3    10 |      0.7389      0.1891       0.0934      1.3843            *
+     4     2 |      0.1631      0.1322      -0.2884      0.6146            
+     4     3 |      0.2478      0.1494      -0.2621      0.7577            
+     4     4 |      0.6358      0.1531       0.1130      1.1586            *
+     4     5 |      0.7552      0.1634       0.1973      1.3132            *
+     4     6 |      0.6881      0.1675       0.1164      1.2599            *
+     4     7 |      0.7619      0.1456       0.2647      1.2590            *
+     4     8 |      0.8481      0.1416       0.3647      1.3314            *
+     4     9 |      0.7331      0.1703       0.1518      1.3144            *
+     4    10 |      0.4849      0.1986      -0.1929      1.1628            
+     5     2 |      0.0114      0.1420      -0.4733      0.4960            
+     5     3 |     -0.1611      0.1414      -0.6437      0.3215            
+     5     4 |      0.0476      0.1382      -0.4241      0.5193            
+     5     5 |      0.9366      0.1678       0.3639      1.5093            *
+     5     6 |      0.6963      0.1551       0.1667      1.2260            *
+     5     7 |      0.8443      0.1549       0.3155      1.3732            *
+     5     8 |      1.0655      0.1846       0.4352      1.6958            *
+     5     9 |      1.0748      0.1904       0.4249      1.7247            *
+     5    10 |      0.9554      0.2015       0.2674      1.6435            *
+     6     2 |     -0.0036      0.1471      -0.5058      0.4986            
+     6     3 |     -0.1783      0.1604      -0.7260      0.3694            
+     6     4 |      0.1223      0.1619      -0.4303      0.6749            
+     6     5 |     -0.2203      0.1398      -0.6977      0.2572            
+     6     6 |      0.9919      0.1478       0.4871      1.4966            *
+     6     7 |      1.1751      0.1461       0.6764      1.6738            *
+     6     8 |      1.3163      0.1557       0.7848      1.8478            *
+     6     9 |      1.3076      0.1612       0.7572      1.8581            *
+     6    10 |      1.2214      0.1970       0.5488      1.8941            *
+     7     2 |     -0.0042      0.1348      -0.4643      0.4559            
+     7     3 |      0.0379      0.1597      -0.5072      0.5830            
+     7     4 |     -0.2976      0.1691      -0.8749      0.2798            
+     7     5 |      0.2212      0.1616      -0.3305      0.7730            
+     7     6 |      0.1323      0.1522      -0.3872      0.6518            
+     7     7 |      0.8969      0.1614       0.3458      1.4481            *
+     7     8 |      0.6721      0.1636       0.1134      1.2308            *
+     7     9 |      0.9337      0.1874       0.2939      1.5735            *
+     7    10 |      0.8297      0.2186       0.0833      1.5760            *
+     8     2 |     -0.1054      0.1399      -0.5830      0.3723            
+     8     3 |     -0.0113      0.1374      -0.4803      0.4577            
+     8     4 |      0.1481      0.1555      -0.3828      0.6789            
+     8     5 |     -0.0940      0.1561      -0.6269      0.4390            
+     8     6 |      0.0389      0.1515      -0.4784      0.5562            
+     8     7 |     -0.2003      0.1760      -0.8012      0.4006            
+     8     8 |      1.0547      0.1657       0.4888      1.6205            *
+     8     9 |      0.9783      0.1813       0.3592      1.5973            *
+     8    10 |      0.8457      0.2097       0.1296      1.5618            *
+     9     2 |      0.0560      0.1439      -0.4354      0.5474            
+     9     3 |     -0.0483      0.1278      -0.4847      0.3880            
+     9     4 |      0.0685      0.1466      -0.4321      0.5692            
+     9     5 |     -0.1069      0.1622      -0.6605      0.4467            
+     9     6 |      0.1066      0.1544      -0.4205      0.6337            
+     9     7 |      0.0795      0.1553      -0.4507      0.6098            
+     9     8 |     -0.0649      0.1852      -0.6972      0.5675            
+     9     9 |      0.9448      0.1914       0.2914      1.5983            *
+     9    10 |      1.1100      0.2059       0.4072      1.8129            *
+    10     2 |     -0.0634      0.1359      -0.5275      0.4006            
+    10     3 |      0.0842      0.1444      -0.4089      0.5774            
+    10     4 |     -0.0195      0.1377      -0.4898      0.4507            
+    10     5 |     -0.0026      0.1512      -0.5189      0.5138            
+    10     6 |      0.0070      0.1579      -0.5321      0.5461            
+    10     7 |      0.0930      0.1577      -0.4453      0.6313            
+    10     8 |     -0.1433      0.1821      -0.7650      0.4785            
+    10     9 |      0.0586      0.1980      -0.6173      0.7344            
+    10    10 |      0.9001      0.2194       0.1511      1.6491            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 81 ATT(g,t) rows
+
+----------------------------------------------------------------------
+=== SCENARIO: sim_tp10_const_notyettreated_reg ===
+----------------------------------------------------------------------
+
+Callaway & Sant'Anna (2021) Estimator            Number of obs   =    10,000
+Outcome variable:  y                             Number of units =     1,000
+                                                 Num. (g,t) cells =     81
+Estimator:         reg                           Control group  = notyettreated
+Covariates:        x
+
+------------------------------------------------------------------------------
+ Group Time |    ATT(g,t)   Std. Err.     [95.0% Conf. Band]
+-------------+----------------------------------------------------------------
+     2     2 |      0.8239      0.1554       0.2929      1.3550            *
+     2     3 |      0.8457      0.1549       0.3163      1.3752            *
+     2     4 |      1.0343      0.1492       0.5245      1.5440            *
+     2     5 |      0.9623      0.1486       0.4545      1.4701            *
+     2     6 |      1.0627      0.1617       0.5099      1.6154            *
+     2     7 |      1.0062      0.1535       0.4815      1.5308            *
+     2     8 |      0.9684      0.1663       0.4001      1.5367            *
+     2     9 |      1.1376      0.1928       0.4788      1.7965            *
+     2    10 |      1.0798      0.2238       0.3149      1.8448            *
+     3     2 |      0.0682      0.1530      -0.4546      0.5910            
+     3     3 |      0.7955      0.1500       0.2828      1.3082            *
+     3     4 |      0.7329      0.1520       0.2135      1.2523            *
+     3     5 |      0.9557      0.1547       0.4269      1.4846            *
+     3     6 |      0.7873      0.1522       0.2673      1.3074            *
+     3     7 |      0.9073      0.1533       0.3833      1.4313            *
+     3     8 |      0.8797      0.1618       0.3268      1.4325            *
+     3     9 |      0.6666      0.1826       0.0427      1.2905            *
+     3    10 |      0.7386      0.1891       0.0923      1.3848            *
+     4     2 |      0.1640      0.1323      -0.2880      0.6160            
+     4     3 |      0.2469      0.1494      -0.2638      0.7575            
+     4     4 |      0.6350      0.1530       0.1120      1.1580            *
+     4     5 |      0.7553      0.1634       0.1967      1.3138            *
+     4     6 |      0.6877      0.1676       0.1150      1.2604            *
+     4     7 |      0.7608      0.1457       0.2628      1.2588            *
+     4     8 |      0.8478      0.1416       0.3637      1.3319            *
+     4     9 |      0.7324      0.1704       0.1500      1.3148            *
+     4    10 |      0.4845      0.1988      -0.1949      1.1639            
+     5     2 |      0.0133      0.1419      -0.4717      0.4984            
+     5     3 |     -0.1661      0.1417      -0.6503      0.3181            
+     5     4 |      0.0450      0.1382      -0.4272      0.5172            
+     5     5 |      0.9397      0.1679       0.3658      1.5136            *
+     5     6 |      0.6984      0.1553       0.1677      1.2291            *
+     5     7 |      0.8404      0.1554       0.3094      1.3714            *
+     5     8 |      1.0664      0.1848       0.4347      1.6981            *
+     5     9 |      1.0764      0.1906       0.4249      1.7279            *
+     5    10 |      0.9546      0.2025       0.2627      1.6466            *
+     6     2 |     -0.0036      0.1471      -0.5063      0.4991            
+     6     3 |     -0.1783      0.1605      -0.7267      0.3701            
+     6     4 |      0.1223      0.1619      -0.4309      0.6755            
+     6     5 |     -0.2202      0.1399      -0.6983      0.2579            
+     6     6 |      0.9919      0.1479       0.4865      1.4972            *
+     6     7 |      1.1749      0.1461       0.6757      1.6742            *
+     6     8 |      1.3163      0.1557       0.7842      1.8484            *
+     6     9 |      1.3076      0.1613       0.7565      1.8587            *
+     6    10 |      1.2214      0.1970       0.5481      1.8948            *
+     7     2 |     -0.0042      0.1348      -0.4648      0.4564            
+     7     3 |      0.0379      0.1597      -0.5077      0.5836            
+     7     4 |     -0.2976      0.1691      -0.8755      0.2804            
+     7     5 |      0.2213      0.1616      -0.3311      0.7737            
+     7     6 |      0.1323      0.1522      -0.3877      0.6523            
+     7     7 |      0.8968      0.1614       0.3451      1.4485            *
+     7     8 |      0.6721      0.1636       0.1128      1.2313            *
+     7     9 |      0.9337      0.1874       0.2933      1.5742            *
+     7    10 |      0.8297      0.2186       0.0826      1.5768            *
+     8     2 |     -0.1035      0.1397      -0.5808      0.3739            
+     8     3 |     -0.0139      0.1377      -0.4847      0.4568            
+     8     4 |      0.1476      0.1554      -0.3836      0.6787            
+     8     5 |     -0.0923      0.1561      -0.6259      0.4413            
+     8     6 |      0.0374      0.1516      -0.4807      0.5555            
+     8     7 |     -0.2022      0.1761      -0.8040      0.3996            
+     8     8 |      1.0568      0.1660       0.4894      1.6241            *
+     8     9 |      0.9821      0.1815       0.3618      1.6024            *
+     8    10 |      0.8473      0.2101       0.1293      1.5653            *
+     9     2 |      0.0562      0.1440      -0.4359      0.5482            
+     9     3 |     -0.0485      0.1278      -0.4853      0.3883            
+     9     4 |      0.0682      0.1468      -0.4334      0.5698            
+     9     5 |     -0.1068      0.1622      -0.6612      0.4476            
+     9     6 |      0.1066      0.1544      -0.4211      0.6342            
+     9     7 |      0.0795      0.1553      -0.4514      0.6103            
+     9     8 |     -0.0642      0.1854      -0.6980      0.5696            
+     9     9 |      0.9453      0.1915       0.2910      1.5996            *
+     9    10 |      1.1103      0.2060       0.4063      1.8142            *
+    10     2 |     -0.0632      0.1358      -0.5274      0.4010            
+    10     3 |      0.0836      0.1442      -0.4091      0.5764            
+    10     4 |     -0.0195      0.1377      -0.4903      0.4512            
+    10     5 |     -0.0021      0.1512      -0.5189      0.5147            
+    10     6 |      0.0074      0.1578      -0.5320      0.5469            
+    10     7 |      0.0908      0.1573      -0.4467      0.6283            
+    10     8 |     -0.1425      0.1822      -0.7653      0.4802            
+    10     9 |      0.0588      0.1980      -0.6179      0.7355            
+    10    10 |      0.9001      0.2194       0.1502      1.6501            *
+------------------------------------------------------------------------------
+ * Confidence band does not cover zero.
+  Posted 81 ATT(g,t) rows
+
+. 
+. 
+. * ═══════════════════════════════════════════════════════════════
+. *  Close postfiles and export
+. * ═══════════════════════════════════════════════════════════════
+. 
+. postclose `att_h'
+
+. postclose `agg_h'
+
+. 
+. preserve
+
+.   use `att_f', clear
+
+.   export delimited "`projdir'/stata_results.csv", replace
+file C:\Users\Usuario\CSDid.jl/stata_results.csv saved
+
+.   di ""
+
+
+.   di "Saved `=_N' ATT(g,t) rows to stata_results.csv"
+Saved 929 ATT(g,t) rows to stata_results.csv
+
+. restore
+
+. 
+. preserve
+
+.   use `agg_f', clear
+
+.   export delimited "`projdir'/stata_aggte_results_full.csv", replace
+file C:\Users\Usuario\CSDid.jl/stata_aggte_results_full.csv saved
+
+.   di ""
+
+
+.   di "Saved `=_N' aggregation rows to stata_aggte_results_full.csv"
+Saved 231 aggregation rows to stata_aggte_results_full.csv
+
+. restore
+
+. 
+. di ""
+
+
+. di "{hline 70}"
+----------------------------------------------------------------------
+
+. di "DONE: All scenarios completed."
+DONE: All scenarios completed.
+
+. di "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+end of do-file
